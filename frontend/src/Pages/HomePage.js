@@ -1,0 +1,208 @@
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import './HomePage.css';
+
+function HomePage() {
+  const [emergencyActive, setEmergencyActive] = useState(false);
+  const navigate = useNavigate();
+
+  const handleEmergencyClick = () => {
+    setEmergencyActive(true);
+    setTimeout(() => setEmergencyActive(false), 3000);
+  };
+
+  const handleRegister = () => {
+    console.log('Register clicked');
+    navigate("/register");
+  };
+
+  const handleLogin = () => {
+    console.log('Login clicked');
+    navigate("/login");
+  };
+
+  const handleTextChat = () => {
+  navigate("/chat");
+};
+  const handleProfile = () => {
+    console.log('Profile clicked');
+    navigate("/profile");
+  };
+  const handleDashboard = () =>{
+    console.log("dashboard clicked");
+    navigate("/dashboard");
+  }
+  const handleLocation = () =>{
+    console.log("location clicked");
+    navigate("/location");
+  }
+  const handleSettings = () =>{
+    console.log("location clicked");
+    navigate("/settings");
+  }
+  return (
+    <div className="homepage">
+      {/* Header */}
+      <header className="header">
+        <div className="container">
+          <div className="header-content">
+            <div className="logo-section">
+              <div className="logo">
+                <span className="shield-icon">🛡️</span>
+              </div>
+              <div className="logo-text">
+                <h1>Emergency Response System</h1>
+                <p>24/7 Emergency Services</p>
+              </div>
+            </div>
+            <div className="header-actions">
+              <button className="text-chat-btn" onClick={handleTextChat}>
+                💬 Text Chat
+              </button>
+              <button className="login-btn" onClick={handleLogin}>
+                Login
+              </button>
+              <button className="register-btn" onClick={handleRegister}>
+                Register
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Navigation */}
+      <nav className="navigation">
+        <div className="container">
+          <div className="nav-links">
+            <button className="nav-link active">Emergency</button>
+            <button className="nav-link" onClick={handleProfile}>
+              Profile
+            </button>
+            <button className="nav-link" onClick={handleLocation}>Location</button>
+            <button className="nav-link" onClick={handleDashboard}>Dashboard</button>
+            <button className="nav-link" onClick={handleSettings}>Settings</button>
+          </div>
+        </div>
+      </nav>
+
+      {/* Main Content */}
+      <main className="main-content">
+        <div className="container">
+          {/* Emergency Panic Button */}
+          <section className="panic-button-section">
+            <h2>Emergency Panic Button</h2>
+            <p className="section-subtitle">Press and hold for immediate emergency assistance</p>
+            
+            <button 
+              onClick={handleEmergencyClick}
+              className={`panic-button ${emergencyActive ? 'active' : ''}`}
+            >
+              ⚠️ {emergencyActive ? 'EMERGENCY ACTIVATED' : 'EMERGENCY'}
+            </button>
+            
+            <p className="panic-button-info">
+              {emergencyActive 
+                ? 'Emergency services have been alerted and your location shared'
+                : 'This will immediately alert emergency services and share your location'
+              }
+            </p>
+          </section>
+
+          {/* Emergency Services */}
+          <section className="emergency-services">
+            <h3>Emergency Services</h3>
+            
+            <div className="services-grid">
+              {/* Police */}
+              <div className="service-card">
+                <div className="service-icon police-icon">🛡️</div>
+                <h4>Police</h4>
+                <p>Criminal activity, theft, violence, suspicious behavior</p>
+                <button className="service-btn police-btn">Need Police Assistance</button>
+              </div>
+
+              {/* Medical */}
+              <div className="service-card">
+                <div className="service-icon medical-icon">❤️</div>
+                <h4>Medical</h4>
+                <p>Injuries, illness, cardiac events, breathing problems</p>
+                <button className="service-btn medical-btn">Need Medical Assistance</button>
+              </div>
+
+              {/* Fire */}
+              <div className="service-card">
+                <div className="service-icon fire-icon">🔥</div>
+                <h4>Fire</h4>
+                <p>Fire, smoke, gas leaks, hazardous materials</p>
+                <button className="service-btn fire-btn">Need Fire assistance</button>
+              </div>
+
+              {/* Accident */}
+              <div className="service-card">
+                <div className="service-icon accident-icon">🚗</div>
+                <h4>Accident</h4>
+                <p>Vehicle accidents, collisions, traffic incidents</p>
+                <button className="service-btn accident-btn">Call Accident</button>
+              </div>
+            </div>
+          </section>
+
+          {/* Additional Services */}
+          <section className="additional-services">
+            <div className="additional-grid">
+              <div className="additional-card">
+                <div className="additional-header">
+                  <span className="additional-icon">📍</span>
+                  <h4>Live Location</h4>
+                </div>
+                <p>Real-time GPS tracking and location sharing with emergency responders</p>
+                <button className="additional-link">Enable Location →</button>
+              </div>
+
+              <div className="additional-card">
+                <div className="additional-header">
+                  <span className="additional-icon">⏱️</span>
+                  <h4>Response Time</h4>
+                </div>
+                <p>Track emergency response units and estimated arrival times</p>
+                <button className="additional-link">View Status →</button>
+              </div>
+
+              <div className="additional-card">
+                <div className="additional-header">
+                  <span className="additional-icon">👥</span>
+                  <h4>Emergency Contacts</h4>
+                </div>
+                <p>Manage your emergency contact list and notification preferences</p>
+                <button className="additional-link">Manage Contacts →</button>
+              </div>
+            </div>
+          </section>
+
+          {/* Quick Actions */}
+          <section className="quick-actions">
+            <h3>Quick Actions</h3>
+            <div className="quick-actions-grid">
+              <button className="quick-action-btn">📱 Report Emergency</button>
+              <button className="quick-action-btn">🚑 Emergency Services</button>
+              <button className="quick-action-btn">📊 Live Updates</button>
+              <button className="quick-action-btn">⚙️ Settings</button>
+            </div>
+          </section>
+        </div>
+      </main>
+
+      {/* Footer */}
+      <footer className="footer">
+        <div className="container">
+          <div className="footer-content">
+            <p>© {new Date().getFullYear()} Emergency Response System | All Rights Reserved</p>
+            <p className="footer-subtitle">Available 24/7 • Multilingual Support • Instant Response</p>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+export default HomePage;
