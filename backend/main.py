@@ -1,55 +1,24 @@
-from fastapi import FastAPI, HTTPException
+# main.py
+from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel, EmailStr
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy import create_engine
-from models.user import Base, User
-from utils.security import encrypt_data, hash_password
- 
-import os, random, time
+from sqlalchemy.orm import Session
+from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from twilio.rest import Client
-from fastapi.middleware.cors import CORSMiddleware
+import os, random, time
+
+from database import SessionLocal, engine
+from models.user import Base, User
+from utils.security import encrypt_data, hash_password, verify_password, create_access_token, decode_access_token
 
 load_dotenv()
 
-# Supabase PostgreSQL connection
-DATABASE_URL = os.getenv("SUPABASE_DATABASE_URL")
+# create tables
+Base.metadata.create_all(bind=engine)
 
-if not DATABASE_URL: 
-    raise ValueError("SUPABASE_DATABASE_URL environment variable is not set")
+app = FastAPI(title="ERS Auth API")
 
-# Enhanced connection configuration for Supabase
-engine = create_engine(
-    DATABASE_URL, 
-    pool_pre_ping=True,
-    pool_recycle=300,
-    pool_timeout=20,
-    max_overflow=0,
-    echo=False  # Set to True for SQL debugging
-)
-
-SessionLocal = sessionmaker(bind=engine)
-app = FastAPI()
-# Test database connection first
-@app.on_event("startup")
-async def startup_event():
-    try:
-        # Test connection
-        with engine.connect() as connection:
-            connection.execute("SELECT 1")
-        print("✅ Database connection successful")
-        
-        # Create tables
-        Base.metadata.create_all(bind=engine)
-        print("✅ Database tables created/verified successfully")
-    except Exception as e:
-        print(f"❌ Database connection failed: {e}")
-        print("Please check your SUPABASE_DATABASE_URL in the .env file")
-        raise
-
-# FastAPI app
-
-
+# CORS - add your frontend origins
 origins = ["http://localhost:3000"]
 app.add_middleware(
     CORSMiddleware,
@@ -59,17 +28,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Twilio setup
-account_sid = os.getenv("TWILIO_ACCOUNT_SID")
-auth_token = os.getenv("TWILIO_AUTH_TOKEN")
-twilio_number = os.getenv("TWILIO_PHONE_NUMBER")
-client = Client(account_sid, auth_token)
+# Twilio client (read from env)
+TW_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TW_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+TW_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
+if not all([TW_SID, TW_TOKEN, TW_NUMBER]):
+    # allow continuing if Twilio not configured; but sending will fail
+    client = None
+else:
+    client = Client(TW_SID, TW_TOKEN)
 
-otp_storage = {}        
-pending_users = {}      
+# In-memory OTP and pending store (for demonstration only)
+otp_storage = {}
+pending_users = {}
 
+# DB dependency
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
-# Models
+# Pydantic models
 class UserCreate(BaseModel):
     first_name: str
     last_name: str
@@ -90,111 +71,139 @@ class UserCreate(BaseModel):
     agree_to_terms: bool
     agree_to_emergency_sharing: bool
 
-
 class VerifyRequest(BaseModel):
     mobile: str
     otp: str
 
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+    rememberMe: bool | None = False
 
-# Test database connection endpoint
-@app.get("/test_db")
-def test_database():
-    try:
-        db = SessionLocal()
-        db.execute("SELECT 1")
-        db.close()
-        return {"status": "success", "message": "Database connection working"}
-    except Exception as e:
-        return {"status": "error", "message": f"Database connection failed: {str(e)}"}
-
-
-# Send OTP with cooldown
+# OTP endpoint
 @app.post("/send_otp")
 def send_otp(user: UserCreate):
     current_time = time.time()
-    
-    # Check if already sent & enforce 60s cooldown
-    if user.phone in otp_storage:
-        elapsed = current_time - otp_storage[user.phone]["timestamp"]
+    phone = user.phone.strip()
+    # Enforce 60s cooldown
+    stored = otp_storage.get(phone)
+    if stored:
+        elapsed = current_time - stored["timestamp"]
         if elapsed < 60:
-            raise HTTPException(
-                status_code=429,
-                detail=f"Please wait {int(60 - elapsed)} seconds before requesting another OTP"
-            )
+            raise HTTPException(status_code=429, detail=f"Please wait {int(60-elapsed)} seconds before requesting another OTP")
 
-    # Generate new OTP
     otp = str(random.randint(100000, 999999))
-    otp_storage[user.phone] = {"otp": otp, "timestamp": current_time}
-    pending_users[user.phone] = user.dict()
+    otp_storage[phone] = {"otp": otp, "timestamp": current_time}
+    pending_users[phone] = user.dict()
 
-    try:
-        message = client.messages.create(
-            body=f"Your ERS OTP is: {otp}",
-            from_=twilio_number,
-            to=f"+91{user.phone}"  # Must be in +91xxxxxxxxxx format
-        )
-        return {"message": "OTP sent successfully"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    # Send via Twilio if configured
+    if client:
+        try:
+            message = client.messages.create(
+                body=f"Your ERS OTP is: {otp}",
+                from_=TW_NUMBER,
+                to=f"+91{phone}"
+            )
+        except Exception as e:
+            # Log and raise
+            raise HTTPException(status_code=500, detail=f"Failed to send OTP: {str(e)}")
 
+    return {"message": "OTP generated and (attempted) to send", "phone": phone}
 
-# Verify OTP and register user
+# Verify OTP and register
 @app.post("/verify_otp")
-def verify_otp(data: VerifyRequest):
-    mobile, otp = data.mobile, data.otp
+def verify_otp(data: VerifyRequest, db: Session = Depends(get_db)):
+    mobile = data.mobile.strip()
     otp_data = otp_storage.get(mobile)
-
     if not otp_data:
         raise HTTPException(status_code=400, detail="No OTP found for this number")
 
-    # Expire OTP after 5 minutes
     if time.time() - otp_data["timestamp"] > 300:
         otp_storage.pop(mobile, None)
         pending_users.pop(mobile, None)
-        raise HTTPException(status_code=400, detail="OTP expired, please request a new one")
+        raise HTTPException(status_code=400, detail="OTP expired")
 
-    # Validate OTP
-    if otp_data["otp"] == otp:
-        otp_storage.pop(mobile, None)
-
-        # Get pending user data
-        user_data = pending_users.pop(mobile, None)
-        if not user_data:
-            raise HTTPException(status_code=400, detail="No user data found for this number")
-
-        db = SessionLocal()
-        try:
-            hashed_password = hash_password(user_data["password"])
-            db_user = User(
-                first_name=user_data["first_name"],
-                last_name=user_data["last_name"],
-                email=user_data["email"],
-                phone=encrypt_data(user_data["phone"]),
-                password_hash=hashed_password,
-                primary_emergency_contact=user_data["primary_emergency_contact"],
-                primary_emergency_phone=encrypt_data(user_data["primary_emergency_phone"]),
-                primary_emergency_relation=user_data["primary_emergency_relation"],
-                secondary_emergency_contact=user_data["secondary_emergency_contact"],
-                secondary_emergency_phone=encrypt_data(user_data["secondary_emergency_phone"]) if user_data["secondary_emergency_phone"] else None,
-                secondary_emergency_relation=user_data["secondary_emergency_relation"],
-                street_address=encrypt_data(user_data["street_address"]),
-                city=encrypt_data(user_data["city"]),   # Fixed: removed unnecessary if check
-                state=encrypt_data(user_data["state"]), # Fixed: removed unnecessary if check 
-                zip_code=encrypt_data(user_data["zip_code"]), # Fixed: removed unnecessary if check
-                medical_conditions=user_data["medical_conditions"],
-                agree_to_terms=user_data["agree_to_terms"],
-                agree_to_emergency_sharing=user_data["agree_to_emergency_sharing"],
-                emergency_calls=0   
-            )
-
-            db.add(db_user)
-            db.commit()
-            db.refresh(db_user)
-            return {"message": "OTP verified & user registered", "user_id": db_user.user_id}
-        except Exception as e:
-            db.rollback()
-            raise HTTPException(status_code=400, detail=str(e))
-        finally:
-            db.close()
-    else:
+    if otp_data["otp"] != data.otp:
         raise HTTPException(status_code=400, detail="Invalid OTP")
+
+    # OTP valid: register user
+    user_data = pending_users.pop(mobile, None)
+    otp_storage.pop(mobile, None)
+    if not user_data:
+        raise HTTPException(status_code=400, detail="No pending user data for this number")
+
+    # Check if email exists
+    email = user_data["email"].strip().lower()
+    existing = db.query(User).filter(User.email == email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="User with that email already exists")
+
+    hashed_pw = hash_password(user_data["password"])
+    db_user = User(
+        first_name=user_data["first_name"],
+        last_name=user_data["last_name"],
+        email=email,
+        phone=encrypt_data(user_data["phone"]),
+        password_hash=hashed_pw,
+        primary_emergency_contact=user_data["primary_emergency_contact"],
+        primary_emergency_phone=encrypt_data(user_data["primary_emergency_phone"]),
+        primary_emergency_relation=user_data["primary_emergency_relation"],
+        secondary_emergency_contact=user_data.get("secondary_emergency_contact"),
+        secondary_emergency_phone=encrypt_data(user_data["secondary_emergency_phone"]) if user_data.get("secondary_emergency_phone") else None,
+        secondary_emergency_relation=user_data.get("secondary_emergency_relation"),
+        street_address=encrypt_data(user_data["street_address"]),
+        city=encrypt_data(user_data["city"]) if user_data.get("city") else None,
+        state=encrypt_data(user_data["state"]) if user_data.get("state") else None,
+        zip_code=encrypt_data(user_data["zip_code"]) if user_data.get("zip_code") else None,
+        medical_conditions=user_data.get("medical_conditions"),
+        agree_to_terms=user_data["agree_to_terms"],
+        agree_to_emergency_sharing=user_data["agree_to_emergency_sharing"],
+        emergency_calls=0
+    )
+
+    try:
+        db.add(db_user)
+        db.commit()
+        db.refresh(db_user)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"DB error: {str(e)}")
+
+    return {"message": "User registered", "user_id": db_user.user_id}
+
+# Login endpoint (issues JWT)
+@app.post("/login")
+def login(payload: LoginRequest, db: Session = Depends(get_db)):
+    email = payload.email.strip().lower()
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    if not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    expires_minutes = 60 if not payload.rememberMe else 60 * 24 * 7
+    token = create_access_token(subject=str(user.user_id), extra_claims={"email": user.email}, expires_minutes=expires_minutes)
+    return {"access_token": token, "expires_in": expires_minutes * 60}
+
+# Protected route to fetch current user
+from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+@app.get("/me")
+def me(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    try:
+        payload = decode_access_token(token)
+        user_id = int(payload.get("sub"))
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return {
+        "user_id": user.user_id,
+        "email": user.email,
+        "name": f"{user.first_name} {user.last_name}"
+    }
