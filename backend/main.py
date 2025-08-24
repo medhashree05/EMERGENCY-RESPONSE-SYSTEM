@@ -4,23 +4,51 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine
 from models.user import Base, User
 from utils.security import encrypt_data, hash_password
-
+ 
 import os, random, time
 from dotenv import load_dotenv
 from twilio.rest import Client
 from fastapi.middleware.cors import CORSMiddleware
 
-# Load env variables
 load_dotenv()
 
-# Database setup
-DATABASE_URL = os.getenv("DATABASE_URL")
-engine = create_engine(DATABASE_URL)
+# Supabase PostgreSQL connection
+DATABASE_URL = os.getenv("SUPABASE_DATABASE_URL")
+
+if not DATABASE_URL: 
+    raise ValueError("SUPABASE_DATABASE_URL environment variable is not set")
+
+# Enhanced connection configuration for Supabase
+engine = create_engine(
+    DATABASE_URL, 
+    pool_pre_ping=True,
+    pool_recycle=300,
+    pool_timeout=20,
+    max_overflow=0,
+    echo=False  # Set to True for SQL debugging
+)
+
 SessionLocal = sessionmaker(bind=engine)
-Base.metadata.create_all(bind=engine)
+app = FastAPI()
+# Test database connection first
+@app.on_event("startup")
+async def startup_event():
+    try:
+        # Test connection
+        with engine.connect() as connection:
+            connection.execute("SELECT 1")
+        print("✅ Database connection successful")
+        
+        # Create tables
+        Base.metadata.create_all(bind=engine)
+        print("✅ Database tables created/verified successfully")
+    except Exception as e:
+        print(f"❌ Database connection failed: {e}")
+        print("Please check your SUPABASE_DATABASE_URL in the .env file")
+        raise
 
 # FastAPI app
-app = FastAPI()
+
 
 origins = ["http://localhost:3000"]
 app.add_middleware(
@@ -68,11 +96,23 @@ class VerifyRequest(BaseModel):
     otp: str
 
 
+# Test database connection endpoint
+@app.get("/test_db")
+def test_database():
+    try:
+        db = SessionLocal()
+        db.execute("SELECT 1")
+        db.close()
+        return {"status": "success", "message": "Database connection working"}
+    except Exception as e:
+        return {"status": "error", "message": f"Database connection failed: {str(e)}"}
+
+
 # Send OTP with cooldown
 @app.post("/send_otp")
 def send_otp(user: UserCreate):
     current_time = time.time()
-
+    
     # Check if already sent & enforce 60s cooldown
     if user.phone in otp_storage:
         elapsed = current_time - otp_storage[user.phone]["timestamp"]
@@ -91,7 +131,7 @@ def send_otp(user: UserCreate):
         message = client.messages.create(
             body=f"Your ERS OTP is: {otp}",
             from_=twilio_number,
-            to=user.phone  # Must be in +91xxxxxxxxxx format
+            to=f"+91{user.phone}"  # Must be in +91xxxxxxxxxx format
         )
         return {"message": "OTP sent successfully"}
     except Exception as e:
@@ -138,9 +178,9 @@ def verify_otp(data: VerifyRequest):
                 secondary_emergency_phone=encrypt_data(user_data["secondary_emergency_phone"]) if user_data["secondary_emergency_phone"] else None,
                 secondary_emergency_relation=user_data["secondary_emergency_relation"],
                 street_address=encrypt_data(user_data["street_address"]),
-                city=encrypt_data(user_data["city"]) if user_data["city"] else None,   
-                state=encrypt_data(user_data["state"]) if user_data["state"] else None, 
-                zip_code=encrypt_data(user_data["zip_code"]) if user_data["zip_code"] else None,
+                city=encrypt_data(user_data["city"]),   # Fixed: removed unnecessary if check
+                state=encrypt_data(user_data["state"]), # Fixed: removed unnecessary if check 
+                zip_code=encrypt_data(user_data["zip_code"]), # Fixed: removed unnecessary if check
                 medical_conditions=user_data["medical_conditions"],
                 agree_to_terms=user_data["agree_to_terms"],
                 agree_to_emergency_sharing=user_data["agree_to_emergency_sharing"],

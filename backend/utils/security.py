@@ -1,6 +1,10 @@
+# utils/security.py
 from cryptography.fernet import Fernet
 from passlib.context import CryptContext
+from dotenv import load_dotenv
 import os
+
+load_dotenv()
 
 # Generate a key only once and store it in .env
 # Fernet.generate_key()

@@ -663,11 +663,7 @@ function Register() {
           <button onClick={handleVerifyOtp}>Verify OTP</button>
 
           {/* Resend OTP button with cooldown display */}
-          <button onClick={handleSendOtp} disabled={resendCooldown > 0}>
-            {resendCooldown > 0
-              ? `Resend OTP in ${resendCooldown}s`
-              : 'Resend OTP'}
-          </button>
+          
         </div>
       )}
     </div>
