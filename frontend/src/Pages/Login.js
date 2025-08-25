@@ -1,134 +1,121 @@
-import React, { useState } from 'react';
-import {useNavigate} from 'react-router-dom';
-import './Login.css';
+import React, { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { supabase } from '../supabaseClient' // <-- adjust path
+import './Login.css'
 
 function Login() {
   const [formData, setFormData] = useState({
     email: '',
     password: '',
-    rememberMe: false
-  });
-  const navigate = useNavigate();
+    rememberMe: false,
+  })
+  const navigate = useNavigate()
 
-  const [errors, setErrors] = useState({});
-  const [isLoading, setIsLoading] = useState(false);
-  const [showForgotPassword, setShowForgotPassword] = useState(false);
-  const [forgotEmail, setForgotEmail] = useState('');
+  const [errors, setErrors] = useState({})
+  const [isLoading, setIsLoading] = useState(false)
+  const [showForgotPassword, setShowForgotPassword] = useState(false)
+  const [forgotEmail, setForgotEmail] = useState('')
 
   const handleChange = (e) => {
-    const { name, value, type, checked } = e.target;
-    setFormData(prevState => ({
+    const { name, value, type, checked } = e.target
+    setFormData((prevState) => ({
       ...prevState,
-      [name]: type === 'checkbox' ? checked : value
-    }));
+      [name]: type === 'checkbox' ? checked : value,
+    }))
 
-    // Clear error when user starts typing
     if (errors[name]) {
-      setErrors(prev => ({ ...prev, [name]: '' }));
+      setErrors((prev) => ({ ...prev, [name]: '' }))
     }
-  };
+  }
 
   const validateForm = () => {
-    const newErrors = {};
+    const newErrors = {}
 
-    // Required field validation
     if (!formData.email.trim()) {
-      newErrors.email = 'Email is required';
+      newErrors.email = 'Email is required'
     } else {
-      // Email validation
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
       if (!emailRegex.test(formData.email)) {
-        newErrors.email = 'Please enter a valid email address';
+        newErrors.email = 'Please enter a valid email address'
       }
     }
 
     if (!formData.password) {
-      newErrors.password = 'Password is required';
+      newErrors.password = 'Password is required'
     }
 
-    return newErrors;
-  };
+    return newErrors
+  }
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    
-    const validationErrors = validateForm();
+    e.preventDefault()
+
+    const validationErrors = validateForm()
     if (Object.keys(validationErrors).length > 0) {
-      setErrors(validationErrors);
-      return;
+      setErrors(validationErrors)
+      return
     }
 
-    setIsLoading(true);
-    
+    setIsLoading(true)
+
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      console.log('Login data:', formData);
-      alert('Login successful! Welcome back.');
-      
-      // Reset form
-      setFormData({
-        email: '',
-        password: '',
-        rememberMe: false
-      });
-    } catch (error) {
-      console.error('Login error:', error);
-      setErrors({ general: 'Invalid email or password. Please try again.' });
+      const response = await fetch('http://localhost:8000/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        alert('Login successful! Welcome back.')
+        localStorage.setItem('user', JSON.stringify(data.user))
+        localStorage.setItem('token', data.token) // <-- store JWT
+        navigate('/dashboard') // redirect after login
+      } else {
+        setErrors({ general: data.error || 'Invalid email or password' })
+      }
+    } catch (err) {
+      console.error('Login error:', err)
+      setErrors({ general: 'Something went wrong. Please try again.' })
     } finally {
-      setIsLoading(false);
+      setIsLoading(false)
     }
-  };
+  }
 
   const handleForgotPasswordSubmit = async (e) => {
-    e.preventDefault();
-    
+    e.preventDefault()
+
     if (!forgotEmail.trim()) {
-      alert('Please enter your email address');
-      return;
+      alert('Please enter your email')
+      return
     }
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     if (!emailRegex.test(forgotEmail)) {
-      alert('Please enter a valid email address');
-      return;
+      alert('Please enter a valid email')
+      return
     }
 
-    try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      console.log('Password reset requested for:', forgotEmail);
-      alert('Password reset instructions have been sent to your email.');
-      
-      setShowForgotPassword(false);
-      setForgotEmail('');
-    } catch (error) {
-      console.error('Password reset error:', error);
-      alert('Failed to send reset email. Please try again.');
+    const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
+      redirectTo: 'http://localhost:3000/reset-password',
+    })
+
+    if (error) {
+      alert(error.message)
+    } else {
+      alert('Password reset instructions sent!')
+      setShowForgotPassword(false)
     }
-  };
+  }
 
-  const handleBackToHome = () => {
-    // Add navigation logic here
-    console.log('Back to home clicked');
-    navigate('/');
-  };
-   const handleTextChat = () => {
-  navigate('/chat');
-   };
-
-  const handleGoToRegister = () => {
-    // Add navigation logic here
-    console.log('Go to register clicked');
-    navigate('/register');
-  };
-
-  const handleQuickAccess = (type) => {
-    console.log(`Quick access: ${type}`);
-    // Add quick access logic here
-  };
+  const handleBackToHome = () => navigate('/')
+  const handleGoToRegister = () => navigate('/register')
+  const handleTextChat = () => navigate('/chat')
+  const handleQuickAccess = (type) => console.log(`Quick access: ${type}`)
 
   return (
     <div className="login-page">
@@ -160,10 +147,9 @@ function Login() {
 
               <form className="login-form" onSubmit={handleSubmit}>
                 <div className="form-group">
-                  <label htmlFor="email">Email Address</label>
+                  <label>Email Address</label>
                   <input
                     type="email"
-                    id="email"
                     name="email"
                     value={formData.email}
                     onChange={handleChange}
@@ -171,14 +157,15 @@ function Login() {
                     placeholder="Enter your email address"
                     autoComplete="email"
                   />
-                  {errors.email && <span className="error-message">{errors.email}</span>}
+                  {errors.email && (
+                    <span className="error-message">{errors.email}</span>
+                  )}
                 </div>
 
                 <div className="form-group">
-                  <label htmlFor="password">Password</label>
+                  <label>Password</label>
                   <input
                     type="password"
-                    id="password"
                     name="password"
                     value={formData.password}
                     onChange={handleChange}
@@ -186,7 +173,9 @@ function Login() {
                     placeholder="Enter your password"
                     autoComplete="current-password"
                   />
-                  {errors.password && <span className="error-message">{errors.password}</span>}
+                  {errors.password && (
+                    <span className="error-message">{errors.password}</span>
+                  )}
                 </div>
 
                 <div className="form-options">
@@ -200,9 +189,9 @@ function Login() {
                     <span className="checkmark"></span>
                     Remember me
                   </label>
-                  
-                  <button 
-                    type="button" 
+
+                  <button
+                    type="button"
                     className="forgot-password-btn"
                     onClick={() => setShowForgotPassword(true)}
                   >
@@ -210,8 +199,8 @@ function Login() {
                   </button>
                 </div>
 
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   className="login2-btn"
                   disabled={isLoading}
                 >
@@ -227,34 +216,42 @@ function Login() {
               </form>
 
               <div className="register-link">
-                <p>Don't have an account? <button onClick={handleGoToRegister} className="link-btn">Create one here</button></p>
+                <p>
+                  Don't have an account?{' '}
+                  <button onClick={handleGoToRegister} className="link-btn">
+                    Create one here
+                  </button>
+                </p>
               </div>
             </div>
 
             {/* Quick Access */}
             <div className="quick-access">
               <h3>Emergency Quick Access</h3>
-              <p>For immediate emergencies, you can access these services without logging in:</p>
+              <p>
+                For immediate emergencies, you can access these services without
+                logging in:
+              </p>
               <div className="quick-access-buttons">
-                <button 
+                <button
                   className="quick-btn emergency"
                   onClick={handleTextChat}
                 >
-                  🚨 Emergency Chat  
+                  🚨 Emergency Chat
                 </button>
-                <button 
+                <button
                   className="quick-btn medical"
                   onClick={() => handleQuickAccess('medical')}
                 >
                   🏥 Medical Emergency
                 </button>
-                <button 
+                <button
                   className="quick-btn fire"
                   onClick={() => handleQuickAccess('fire')}
                 >
                   🔥 Fire Emergency
                 </button>
-                <button 
+                <button
                   className="quick-btn police"
                   onClick={() => handleQuickAccess('police')}
                 >
@@ -267,37 +264,42 @@ function Login() {
 
         {/* Forgot Password Modal */}
         {showForgotPassword && (
-          <div className="modal-overlay" onClick={() => setShowForgotPassword(false)}>
+          <div
+            className="modal-overlay"
+            onClick={() => setShowForgotPassword(false)}
+          >
             <div className="modal-content" onClick={(e) => e.stopPropagation()}>
               <div className="modal-header">
                 <h3>Reset Your Password</h3>
-                <button 
+                <button
                   className="modal-close"
                   onClick={() => setShowForgotPassword(false)}
                 >
                   ×
                 </button>
               </div>
-              
+
               <div className="modal-body">
-                <p>Enter your email address and we'll send you instructions to reset your password.</p>
-                
+                <p>
+                  Enter your email address and we'll send you instructions to
+                  reset your password.
+                </p>
+
                 <form onSubmit={handleForgotPasswordSubmit}>
                   <div className="form-group">
-                    <label htmlFor="forgotEmail">Email Address</label>
+                    <label>Email Address</label>
                     <input
                       type="email"
-                      id="forgotEmail"
                       value={forgotEmail}
                       onChange={(e) => setForgotEmail(e.target.value)}
                       placeholder="Enter your email address"
                       autoFocus
                     />
                   </div>
-                  
+
                   <div className="modal-actions">
-                    <button 
-                      type="button" 
+                    <button
+                      type="button"
                       className="btn-secondary"
                       onClick={() => setShowForgotPassword(false)}
                     >
@@ -314,7 +316,7 @@ function Login() {
         )}
       </div>
     </div>
-  );
+  )
 }
 
-export default Login;
+export default Login

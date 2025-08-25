@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import './Register.css'
 
@@ -31,7 +31,7 @@ function Register() {
   const [isLoading, setIsLoading] = useState(false)
   const [showOtpPopup, setShowOtpPopup] = useState(false)
   const [otp, setOtp] = useState('')
-
+  const [cooldown, setCooldown] = useState(0)
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target
     setFormData((prevState) => ({
@@ -194,6 +194,34 @@ function Register() {
       setIsLoading(false)
     }
   }
+  const handleResendOtp = async () => {
+    try {
+      const response = await fetch('http://localhost:8000/resend_otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: `+91${formData.phone}` }),
+      })
+
+      const data = await response.json()
+      if (response.ok) {
+        alert('New OTP sent!')
+        setCooldown(60)
+      } else {
+        alert(data.error)
+      }
+    } catch (error) {
+      console.error('Resend OTP error:', error)
+      alert('Failed to resend OTP')
+    }
+  }
+
+  // Countdown for button
+  useEffect(() => {
+    if (cooldown > 0) {
+      const timer = setTimeout(() => setCooldown(cooldown - 1), 1000)
+      return () => clearTimeout(timer)
+    }
+  }, [cooldown])
 
   const handleVerifyOtp = async () => {
     const response = await fetch('http://localhost:8000/verify_otp', {
@@ -662,8 +690,9 @@ function Register() {
           />
           <button onClick={handleVerifyOtp}>Verify OTP</button>
 
-          {/* Resend OTP button with cooldown display */}
-          
+          <button onClick={handleResendOtp} disabled={cooldown > 0}>
+            {cooldown > 0 ? `Resend OTP in ${cooldown}s` : 'Resend OTP'}
+          </button>
         </div>
       )}
     </div>
