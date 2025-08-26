@@ -73,8 +73,8 @@ function Login() {
       if (response.ok) {
         alert('Login successful! Welcome back.')
         localStorage.setItem('user', JSON.stringify(data.user))
-        localStorage.setItem('token', data.token) // <-- store JWT
-        navigate('/dashboard') // redirect after login
+        localStorage.setItem('token', data.token) 
+        navigate('/') 
       } else {
         setErrors({ general: data.error || 'Invalid email or password' })
       }

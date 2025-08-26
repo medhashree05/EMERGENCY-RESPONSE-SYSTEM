@@ -25,81 +25,8 @@ function ChatPage() {
     scrollToBottom();
   }, [messages]);
 
-  const emergencyKeywords = ['emergency', 'help', 'urgent', 'danger', 'fire', 'police', 'medical', 'accident', 'hurt', 'injured', 'bleeding', 'chest pain', 'unconscious', 'robbery', 'attack'];
-
-  const getAIResponse = (userMessage) => {
-    const message = userMessage.toLowerCase();
-    
-    // Check for emergency keywords
-    const isEmergencyMessage = emergencyKeywords.some(keyword => message.includes(keyword));
-    
-    if (isEmergencyMessage) {
-      setIsEmergency(true);
-      return {
-        text: "🚨 I detect this might be an emergency situation. If you're in immediate danger, please call emergency services right away!\n\n• Police: 911\n• Medical: 911\n• Fire: 911\n\nWould you like me to help you connect with emergency services or provide immediate guidance while help is on the way?",
-        isUrgent: true
-      };
-    }
-
-    // First aid responses
-    if (message.includes('first aid') || message.includes('bleeding') || message.includes('wound')) {
-      return {
-        text: "🩹 For bleeding wounds:\n1. Apply direct pressure with a clean cloth\n2. Elevate the wound above heart level if possible\n3. Don't remove embedded objects\n4. Seek medical attention if bleeding is severe\n\nFor serious injuries, call 911 immediately. Would you like more specific first aid information?",
-        isUrgent: false
-      };
-    }
-
-    if (message.includes('chest pain') || message.includes('heart attack')) {
-      return {
-        text: "⚠️ Chest pain can be serious! Call 911 immediately if experiencing:\n• Severe chest pain or pressure\n• Pain radiating to arm, jaw, or back\n• Shortness of breath\n• Nausea or sweating\n\nWhile waiting for help:\n1. Stay calm and sit down\n2. Loosen tight clothing\n3. Take aspirin if not allergic\n\nThis is potentially life-threatening - don't delay calling 911!",
-        isUrgent: true
-      };
-    }
-
-    if (message.includes('fire') || message.includes('smoke')) {
-      return {
-        text: "🔥 Fire Safety Protocol:\n1. GET OUT immediately - don't gather belongings\n2. Feel doors before opening (hot = don't open)\n3. Stay low under smoke\n4. Call 911 once you're safely outside\n5. Go to your meeting point\n\nNever go back inside a burning building. Are you currently safe?",
-        isUrgent: true
-      };
-    }
-
-    if (message.includes('location') || message.includes('where am i')) {
-      return {
-        text: "📍 To help emergency services find you:\n1. Enable location services on your device\n2. Know your exact address if possible\n3. Look for landmarks or cross streets\n4. Stay on the line with 911\n\nI can help you identify your location. Are you able to see any street signs or landmarks?",
-        isUrgent: false
-      };
-    }
-
-    if (message.includes('poison') || message.includes('overdose')) {
-      return {
-        text: "☠️ Poison Control Emergency:\n• Call Poison Control: 1-800-222-1222\n• Call 911 if unconscious or difficulty breathing\n\nDO NOT induce vomiting unless told to do so.\nHave the poison container ready when calling.\n\nWhat type of substance was involved?",
-        isUrgent: true
-      };
-    }
-
-    if (message.includes('panic') || message.includes('anxiety') || message.includes('stress')) {
-      return {
-        text: "🫁 For panic or anxiety:\n1. Focus on slow, deep breathing\n2. Count: inhale for 4, hold for 4, exhale for 4\n3. Ground yourself: name 5 things you can see\n4. You're safe - this feeling will pass\n\nIf you're having thoughts of self-harm, please call:\n• National Suicide Prevention Lifeline: 988\n• Crisis Text Line: Text HOME to 741741\n\nAre you in a safe place right now?",
-        isUrgent: false
-      };
-    }
-
-    // General helpful responses
-    if (message.includes('hello') || message.includes('hi')) {
-      return {
-        text: "Hello! I'm here to help with any emergency-related questions or situations. I can provide:\n• First aid guidance\n• Emergency contact information\n• Safety tips and protocols\n• Help connecting with services\n\nWhat can I assist you with today?",
-        isUrgent: false
-      };
-    }
-
-    // Default response
-    return {
-      text: "I understand you need assistance. I'm here to help with emergency situations, safety information, and connecting you with appropriate services.\n\nCould you please provide more details about your situation? For immediate emergencies, always call 911 first.\n\nSome ways I can help:\n• Emergency procedures and protocols\n• First aid guidance\n• Safety tips\n• Connecting with emergency services\n• Mental health resources",
-      isUrgent: false
-    };
-  };
-
-  const handleSendMessage = () => {
+  // ---- Single handleSendMessage that calls backend ----
+  const handleSendMessage = async () => {
     if (inputText.trim() === '') return;
 
     const userMessage = {
@@ -113,20 +40,37 @@ function ChatPage() {
     setInputText('');
     setIsTyping(true);
 
-    // Simulate AI response delay
-    setTimeout(() => {
-      const aiResponse = getAIResponse(inputText);
+    try {
+      const res = await fetch('http://localhost:8000/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: inputText }),
+      });
+
+      const data = await res.json();
+      console.log(data);
       const aiMessage = {
         id: Date.now() + 1,
-        text: aiResponse.text,
+        text: data.reply || "⚠️ Sorry, I couldn't process that.",
         sender: 'ai',
         timestamp: new Date(),
-        isUrgent: aiResponse.isUrgent
+        isUrgent: false
       };
 
       setMessages(prev => [...prev, aiMessage]);
+    } catch (err) {
+      console.error('Chat error:', err);
+      const errorMessage = {
+        id: Date.now() + 2,
+        text: "⚠️ Network error. Please try again.",
+        sender: 'ai',
+        timestamp: new Date(),
+        isUrgent: false
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
       setIsTyping(false);
-    }, 1500);
+    }
   };
 
   const handleKeyPress = (e) => {
@@ -154,20 +98,14 @@ function ChatPage() {
       {/* Header */}
       <header className="chat-header">
         <div className="chat-header-content">
-          <button 
-            className="back-button"
-            onClick={() => navigate('/')}
-          >
+          <button className="back-button" onClick={() => navigate('/')}>
             ← Back
           </button>
           <div className="chat-title">
             <h1>🤖 Emergency AI Assistant</h1>
             <span className="chat-status">Online • Ready to help</span>
           </div>
-          <button 
-            className="emergency-call-btn"
-            onClick={handleEmergencyCall}
-          >
+          <button className="emergency-call-btn" onClick={handleEmergencyCall}>
             🚨 Call 911
           </button>
         </div>
@@ -182,10 +120,7 @@ function ChatPage() {
               <strong>Emergency Detected</strong>
               <p>If this is a life-threatening emergency, call 911 immediately</p>
             </div>
-            <button 
-              className="emergency-dismiss"
-              onClick={() => setIsEmergency(false)}
-            >
+            <button className="emergency-dismiss" onClick={() => setIsEmergency(false)}>
               ✕
             </button>
           </div>
@@ -220,7 +155,7 @@ function ChatPage() {
               </div>
             </div>
           ))}
-          
+
           {/* Typing Indicator */}
           {isTyping && (
             <div className="message ai">
@@ -228,9 +163,7 @@ function ChatPage() {
                 <div className="message-avatar">🤖</div>
                 <div className="message-bubble typing">
                   <div className="typing-indicator">
-                    <span></span>
-                    <span></span>
-                    <span></span>
+                    <span></span><span></span><span></span>
                   </div>
                 </div>
               </div>

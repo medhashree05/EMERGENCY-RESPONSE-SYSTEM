@@ -7,6 +7,7 @@ const twilio = require('twilio')
 const crypto = require('crypto')
 const { createClient } = require('@supabase/supabase-js')
 const jwt = require('jsonwebtoken')
+const Groq = require('groq-sdk')   // 👈 Import Groq SDK
 
 dotenv.config()
 const app = express()
@@ -30,6 +31,11 @@ const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
 )
+
+// --------------------
+// Groq setup
+// --------------------
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 
 // --------------------
 // Temporary OTP store
@@ -81,6 +87,38 @@ function authenticateToken(req, res, next) {
 // Routes
 // --------------------
 
+// existing OTP, verify, login routes ...
+
+// 6️⃣ Chat route with Groq
+app.post('/chat', async (req, res) => {
+  try {
+    const { message } = req.body
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required' })
+    }
+
+    // Send to Groq
+    const completion = await groq.chat.completions.create({
+      messages: [
+        { role: 'system', content: 'You are a helpful assistant for emergencies and general queries.' },
+        { role: 'user', content: message }
+      ],
+      model: 'llama-3.1-8b-instant', // fast and good for chat
+    })
+
+    const reply = completion.choices[0]?.message?.content || 'Sorry, I could not generate a response.'
+
+    res.json({ reply })
+  } catch (err) {
+    console.error('Groq chat error:', err)
+    res.status(500).json({ error: 'Failed to get response from Groq' })
+  }
+})
+
+// --------------------
+// Routes
+// --------------------
+
 // 1️⃣ Send OTP
 app.post('/send_otp', async (req, res) => {
   try {
@@ -93,13 +131,14 @@ app.post('/send_otp', async (req, res) => {
       expiresAt: Date.now() + 5 * 60 * 1000,
       userData: { ...userData, phone, password, medical_conditions },
     }
+    console.log(otpStore);
 
     await client.messages.create({
       body: `Your OTP is ${otp}`,
-      from: process.env.TWILIO_PHONE_NUMBER,
+      from: process.env.TWILIO_PHONE,
       to: phone,
     })
-
+ 
     res.json({ message: 'OTP sent successfully' })
   } catch (err) {
     console.error('Twilio error:', err)
@@ -107,14 +146,17 @@ app.post('/send_otp', async (req, res) => {
   }
 })
 
+
+
 // 2️⃣ Verify OTP & Register
 app.post('/verify_otp', async (req, res) => {
   try {
     const { phone, otp } = req.body
+    console.log(req.phone,req.otp);
     const record = otpStore[phone]
 
     if (!record)
-      return res.status(400).json({ error: 'OTP not requested or expired' })
+      return res.status(400).json({ error: 'OTP not requested or expired'})
     if (record.otp !== otp || Date.now() > record.expiresAt)
       return res.status(400).json({ error: 'Invalid or expired OTP' })
 
@@ -226,10 +268,7 @@ app.post('/resend_otp', async (req, res) => {
   try {
     const { phone } = req.body
     const record = otpStore[phone]
-    if (!record)
-      return res
-        .status(400)
-        .json({ error: 'Please register first before resending OTP' })
+    
 
     const now = Date.now()
     if (record.lastSentAt && now - record.lastSentAt < 60 * 1000) {
@@ -246,7 +285,7 @@ app.post('/resend_otp', async (req, res) => {
 
     await client.messages.create({
       body: `Your new OTP is ${newOtp}`,
-      from: process.env.TWILIO_PHONE_NUMBER,
+      from: process.env.TWILIO_PHONE,
       to: phone,
     })
 

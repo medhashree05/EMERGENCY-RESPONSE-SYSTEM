@@ -1,10 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './HomePage.css';
 
 function HomePage() {
   const [emergencyActive, setEmergencyActive] = useState(false);
+  const [user, setUser] = useState(null);
+   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    // Check if user is stored in localStorage
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      setUser(JSON.parse(storedUser));
+    }
+  }, []);
 
   const handleEmergencyClick = () => {
     setEmergencyActive(true);
@@ -40,6 +51,14 @@ function HomePage() {
     console.log("location clicked");
     navigate("/settings");
   }
+
+  const handleLogout = () => {
+    localStorage.removeItem('user');
+    localStorage.removeItem('token');
+    setUser(null);
+    navigate('/');
+  };
+
   return (
     <div className="homepage">
       {/* Header */}
@@ -59,12 +78,32 @@ function HomePage() {
               <button className="text-chat-btn" onClick={handleTextChat}>
                 💬 Text Chat
               </button>
-              <button className="login-btn" onClick={handleLogin}>
-                Login
-              </button>
-              <button className="register-btn" onClick={handleRegister}>
-                Register
-              </button>
+               {user ? (
+                <div className="profile-dropdown" ref={dropdownRef}>
+                  <button
+                    className="profile-btn"
+                    onClick={() => setDropdownOpen(!dropdownOpen)}
+                  >
+                    👤 {user.first_name || user.email} ▾
+                  </button>
+                  {dropdownOpen && (
+                    <div className="dropdown-menu">
+                      <button onClick={handleProfile}>View Profile</button>
+                      <button onClick={handleDashboard}>Dashboard</button>
+                      <button onClick={handleLogout}>Logout</button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <button className="login-btn" onClick={handleLogin}>
+                    Login
+                  </button>
+                  <button className="register-btn" onClick={handleRegister}>
+                    Register
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
