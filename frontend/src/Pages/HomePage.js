@@ -17,10 +17,27 @@ function HomePage() {
     }
   }, []);
 
-  const handleEmergencyClick = () => {
-    setEmergencyActive(true);
-    setTimeout(() => setEmergencyActive(false), 3000);
-  };
+  const handleEmergencyClick = async () => {
+  setEmergencyActive(true);
+
+  try {
+    const token = localStorage.getItem("token");
+    if (token) {
+      await fetch("http://localhost:8000/emergency/call", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+    }
+  } catch (err) {
+    console.error("Emergency call failed:", err);
+  }
+
+  setTimeout(() => setEmergencyActive(false), 3000);
+};
+
 
   const handleRegister = () => {
     console.log('Register clicked');

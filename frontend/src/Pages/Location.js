@@ -44,17 +44,36 @@ function Location() {
     }
   };
 
-  const handleShareLocation = () => {
-    if (!currentLocation) {
-      alert('Location not available. Please enable location services first.');
-      return;
-    }
-    setSharing(true);
-    setTimeout(() => {
-      setSharing(false);
-      alert('Location shared with emergency services successfully!');
-    }, 2000);
-  };
+ const handleShareLocation = async () => {
+  if (!currentLocation) return;
+
+  setSharing(true);
+  try {
+    const res = await fetch("http://localhost:8000/update_location", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${localStorage.getItem("token")}`, // auth token
+      },
+      body: JSON.stringify({
+        latitude: currentLocation.lat,
+        longitude: currentLocation.lng,
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Error updating location");
+
+    alert("✅ Location updated successfully!");
+    console.log("Updated user:", data.user);
+  } catch (err) {
+    console.error("Error:", err);
+    alert("❌ Failed to update location");
+  } finally {
+    setSharing(false);
+  }
+};
+
 
   const handleEmergencyCall = (contact) => {
     if (window.confirm(`Call ${contact.name} at ${contact.phone}?`)) {

@@ -296,6 +296,125 @@ app.post('/resend_otp', async (req, res) => {
   }
 })
 
+// --------------------
+// Profile routes
+// --------------------
+app.get('/profile/me', authenticateToken, async (req, res) => {
+  try {
+    const { user_id } = req.user;
+
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', user_id)
+      .single();
+
+    if (error || !data) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Decrypt medical conditions before sending to frontend
+    const decryptedMedical = decrypt(data.medical_conditions);
+
+    res.json({
+      ...data,
+      medical_conditions: decryptedMedical,
+    });
+  } catch (err) {
+    console.error('Profile fetch error:', err);
+    res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+});
+
+app.put('/profile/me', authenticateToken, async (req, res) => {
+  try {
+    const { user_id } = req.user;
+    const updatedData = { ...req.body };
+
+    // Encrypt medical_conditions before saving
+    if (updatedData.medical_conditions) {
+      updatedData.medical_conditions = encrypt(updatedData.medical_conditions);
+    }
+
+    const { error } = await supabase
+      .from('users')
+      .update(updatedData)
+      .eq('id', user_id);
+
+    if (error) {
+      return res.status(400).json({ error: 'Failed to update profile' });
+    }
+
+    res.json({ message: 'Profile updated successfully' });
+  } catch (err) {
+    console.error('Profile update error:', err);
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+// Increment emergency calls for current user
+app.post("/emergency/call", authenticateToken, async (req, res) => {
+  try {
+    const { user_id } = req.user;
+
+    // Fetch current count
+    const { data: user, error: fetchError } = await supabase
+      .from("users")
+      .select("emergency_calls")
+      .eq("id", user_id)
+      .single();
+
+    if (fetchError) throw fetchError;
+
+    const newCount = (user?.emergency_calls || 0) + 1;
+
+    // Update with incremented value
+    const { data, error } = await supabase
+      .from("users")
+      .update({ emergency_calls: newCount })
+      .eq("id", user_id)
+      .select("emergency_calls")
+      .single();
+
+    if (error) throw error;
+
+    res.json({ success: true, emergency_calls: data.emergency_calls });
+  } catch (err) {
+    console.error("Emergency call error:", err);
+    res.status(500).json({ error: "Failed to update emergency call count" });
+  }
+});
+
+// Update user location
+app.post("/update_location", authenticateToken, async (req, res) => {
+  try {
+    const { user_id } = req.user; // comes from JWT payload
+    const { latitude, longitude } = req.body;
+
+    if (!latitude || !longitude) {
+      return res.status(400).json({ error: "Latitude and longitude are required" });
+    }
+
+    const { data, error } = await supabase
+      .from("users")
+      .update({ latitude, longitude })
+      .eq("id", user_id)
+      .select("id, latitude, longitude")
+      .single();
+
+    if (error) throw error;
+
+    res.json({ success: true, user: data });
+  } catch (err) {
+    console.error("Update location error:", err);
+    res.status(500).json({ error: "Failed to update location" });
+  }
+});
+
+
+
+
+
 app.listen(PORT, () =>
   console.log(`🚀 Server running on http://localhost:${PORT}`)
 )

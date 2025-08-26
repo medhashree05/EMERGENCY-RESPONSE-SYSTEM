@@ -1,35 +1,93 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './Profile.css';
 
 function Profile() {
   const navigate = useNavigate();
   const [isEditing, setIsEditing] = useState(false);
-  const [profileData, setProfileData] = useState({
-    firstName: 'John',
-    lastName: 'Doe',
-    email: 'john.doe@example.com',
-    phone: '+1 (555) 123-4567',
-    address: '123 Main Street, City, State 12345',
-    dateOfBirth: '1990-05-15',
-    bloodType: 'O+',
-    medicalConditions: 'None',
-    emergencyContact1: 'Jane Doe - Wife - +1 (555) 987-6543',
-    emergencyContact2: 'Bob Smith - Brother - +1 (555) 456-7890',
-    preferredHospital: 'City General Hospital'
-  });
+  const [profileData, setProfileData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const token = localStorage.getItem("token");
+
+  useEffect(() => {
+    if (!token) {
+      navigate("/login");
+      return;
+    }
+
+    const fetchProfile = async () => {
+      try {
+        const res = await fetch("http://localhost:8000/profile/me", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (!res.ok) throw new Error("Failed to fetch profile");
+        const data = await res.json();
+        setProfileData({
+          firstName: data.first_name,
+          lastName: data.last_name,
+          email: data.email,
+          phone: data.phone,
+          address: `${data.street_address}, ${data.city}, ${data.state} ${data.zip_code}`,
+          medicalConditions: data.medical_conditions || "",
+          emergencyContact1: `${data.primary_emergency_contact} - ${data.primary_emergency_relation} - ${data.primary_emergency_phone}`,
+          emergencyContact2: `${data.secondary_emergency_contact} - ${data.secondary_emergency_relation} - ${data.secondary_emergency_phone}`,
+          emergencyCalls: data.emergency_calls || 0,
+        });
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchProfile();
+  }, [token, navigate]);
 
   const handleInputChange = (field, value) => {
     setProfileData(prev => ({
       ...prev,
-      [field]: value
+      [field]: value,
     }));
   };
 
-  const handleSave = () => {
-    setIsEditing(false);
-    console.log('Profile saved:', profileData);
+  const handleSave = async () => {
+    try {
+      const payload = {
+        first_name: profileData.firstName,
+        last_name: profileData.lastName,
+        email: profileData.email,
+        phone: profileData.phone,
+        street_address: profileData.address, // ideally split this
+        medical_conditions: profileData.medicalConditions,
+        primary_emergency_contact: profileData.emergencyContact1.split(" - ")[0],
+        primary_emergency_relation: profileData.emergencyContact1.split(" - ")[1],
+        primary_emergency_phone: profileData.emergencyContact1.split(" - ")[2],
+        secondary_emergency_contact: profileData.emergencyContact2.split(" - ")[0],
+        secondary_emergency_relation: profileData.emergencyContact2.split(" - ")[1],
+        secondary_emergency_phone: profileData.emergencyContact2.split(" - ")[2],
+      };
+
+      const res = await fetch("http://localhost:8000/profile/me", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) throw new Error("Failed to save profile");
+      setIsEditing(false);
+    } catch (err) {
+      console.error("Save error:", err);
+    }
   };
+
+  if (loading) return <p>Loading profile...</p>;
+  if (!profileData) return <p>No profile data found.</p>;
 
   const handleCancel = () => {
     setIsEditing(false);
@@ -88,7 +146,6 @@ function Profile() {
                   {profileData.firstName.charAt(0)}{profileData.lastName.charAt(0)}
                 </span>
               </div>
-              <button className="change-photo-btn">📷 Change Photo</button>
             </div>
             <div className="profile-info">
               <h2>{profileData.firstName} {profileData.lastName}</h2>
@@ -170,39 +227,12 @@ function Profile() {
                     rows="3"
                   />
                 </div>
-                <div className="form-group">
-                  <label>Date of Birth</label>
-                  <input
-                    type="date"
-                    value={profileData.dateOfBirth}
-                    onChange={(e) => handleInputChange('dateOfBirth', e.target.value)}
-                    disabled={!isEditing}
-                    className="form-input"
-                  />
-                </div>
               </div>
 
               {/* Medical Information */}
               <div className="form-section">
                 <h3>Medical Information</h3>
-                <div className="form-group">
-                  <label>Blood Type</label>
-                  <select
-                    value={profileData.bloodType}
-                    onChange={(e) => handleInputChange('bloodType', e.target.value)}
-                    disabled={!isEditing}
-                    className="form-select"
-                  >
-                    <option value="A+">A+</option>
-                    <option value="A-">A-</option>
-                    <option value="B+">B+</option>
-                    <option value="B-">B-</option>
-                    <option value="O+">O+</option>
-                    <option value="O-">O-</option>
-                    <option value="AB+">AB+</option>
-                    <option value="AB-">AB-</option>
-                  </select>
-                </div>
+                
                 <div className="form-group">
                   <label>Medical Conditions</label>
                   <textarea
@@ -214,16 +244,7 @@ function Profile() {
                     placeholder="List any medical conditions, allergies, or medications..."
                   />
                 </div>
-                <div className="form-group">
-                  <label>Preferred Hospital</label>
-                  <input
-                    type="text"
-                    value={profileData.preferredHospital}
-                    onChange={(e) => handleInputChange('preferredHospital', e.target.value)}
-                    disabled={!isEditing}
-                    className="form-input"
-                  />
-                </div>
+               
               </div>
 
               {/* Emergency Contacts */}
@@ -263,7 +284,7 @@ function Profile() {
                 <div className="stat-icon">📞</div>
                 <div className="stat-content">
                   <h4>Emergency Calls</h4>
-                  <p className="stat-number">3</p>
+                  <p className="stat-number">{profileData.emergencyCalls}</p>
                   <p className="stat-subtitle">Total calls made</p>
                 </div>
               </div>
