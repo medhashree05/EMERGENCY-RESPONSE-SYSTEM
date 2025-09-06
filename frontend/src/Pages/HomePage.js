@@ -65,9 +65,35 @@ function HomePage() {
     navigate("/location");
   }
   const handleSettings = () =>{
-    console.log("location clicked");
+    console.log("settings clicked");
     navigate("/settings");
   }
+
+  // New navigation handlers for additional services and quick actions
+  const handleEnableLocation = () => {
+    console.log("Enable location clicked");
+    navigate("/location");
+  };
+
+  const handleViewStatus = () => {
+    console.log("View status clicked");
+    navigate("/dashboard");
+  };
+
+  const handleManageContacts = () => {
+    console.log("Manage contacts clicked");
+    navigate("/profile");
+  };
+
+  const handleReportEmergency = () => {
+    console.log("Report emergency clicked");
+    navigate("/chat");
+  };
+
+  const handleLiveUpdates = () => {
+    console.log("Live updates clicked");
+    navigate("/dashboard");
+  };
 
   const handleLogout = () => {
     localStorage.removeItem('user');
@@ -212,7 +238,7 @@ function HomePage() {
                   <h4>Live Location</h4>
                 </div>
                 <p>Real-time GPS tracking and location sharing with emergency responders</p>
-                <button className="additional-link">Enable Location →</button>
+                <button className="additional-link" onClick={handleEnableLocation}>Enable Location →</button>
               </div>
 
               <div className="additional-card">
@@ -221,7 +247,7 @@ function HomePage() {
                   <h4>Response Time</h4>
                 </div>
                 <p>Track emergency response units and estimated arrival times</p>
-                <button className="additional-link">View Status →</button>
+                <button className="additional-link" onClick={handleViewStatus}>View Status →</button>
               </div>
 
               <div className="additional-card">
@@ -230,7 +256,7 @@ function HomePage() {
                   <h4>Emergency Contacts</h4>
                 </div>
                 <p>Manage your emergency contact list and notification preferences</p>
-                <button className="additional-link">Manage Contacts →</button>
+                <button className="additional-link" onClick={handleManageContacts}>Manage Contacts →</button>
               </div>
             </div>
           </section>
@@ -239,10 +265,9 @@ function HomePage() {
           <section className="quick-actions">
             <h3>Quick Actions</h3>
             <div className="quick-actions-grid">
-              <button className="quick-action-btn">📱 Report Emergency</button>
-              <button className="quick-action-btn">🚑 Emergency Services</button>
-              <button className="quick-action-btn">📊 Live Updates</button>
-              <button className="quick-action-btn">⚙️ Settings</button>
+              <button className="quick-action-btn" onClick={handleReportEmergency}>📱 Report Emergency</button>
+              <button className="quick-action-btn" onClick={handleLiveUpdates}>📊 Live Updates</button>
+              <button className="quick-action-btn" onClick={handleSettings}>⚙️ Settings</button>
             </div>
           </section>
         </div>

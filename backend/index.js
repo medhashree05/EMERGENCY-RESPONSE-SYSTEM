@@ -353,37 +353,7 @@ app.put('/profile/me', authenticateToken, async (req, res) => {
 });
 
 // Increment emergency calls for current user
-app.post("/emergency/call", authenticateToken, async (req, res) => {
-  try {
-    const { user_id } = req.user;
 
-    // Fetch current count
-    const { data: user, error: fetchError } = await supabase
-      .from("users")
-      .select("emergency_calls")
-      .eq("id", user_id)
-      .single();
-
-    if (fetchError) throw fetchError;
-
-    const newCount = (user?.emergency_calls || 0) + 1;
-
-    // Update with incremented value
-    const { data, error } = await supabase
-      .from("users")
-      .update({ emergency_calls: newCount })
-      .eq("id", user_id)
-      .select("emergency_calls")
-      .single();
-
-    if (error) throw error;
-
-    res.json({ success: true, emergency_calls: data.emergency_calls });
-  } catch (err) {
-    console.error("Emergency call error:", err);
-    res.status(500).json({ error: "Failed to update emergency call count" });
-  }
-});
 
 // Update user location
 app.post("/update_location", authenticateToken, async (req, res) => {
@@ -411,6 +381,695 @@ app.post("/update_location", authenticateToken, async (req, res) => {
   }
 });
 
+
+// Add these routes to your existing backend/index.js file
+
+// --------------------
+// Location Management Routes
+// --------------------
+
+// GET /locations - Fetch all saved locations for the authenticated user
+app.get('/locations', authenticateToken, async (req, res) => {
+  try {
+    const { user_id } = req.user;
+
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('other_addresses, street_address, city, state, zip_code')
+      .eq('id', user_id)
+      .single();
+
+    if (error) {
+      console.error('Supabase error:', error);
+      return res.status(500).json({ error: 'Failed to fetch locations' });
+    }
+
+    const locations = [];
+    
+    // Add home address as first location if it exists
+    if (user.street_address && user.city) {
+      locations.push({
+        id: 'home',
+        name: 'Home',
+        address: `${user.street_address}, ${user.city}${user.state ? ', ' + user.state : ''}${user.zip_code ? ' ' + user.zip_code : ''}`,
+        latitude: null, // You might want to geocode this later
+        longitude: null,
+        is_primary: true
+      });
+    }
+
+    // Add other addresses
+    if (user.other_addresses && user.other_addresses.length > 0) {
+      user.other_addresses.forEach((address, index) => {
+        if (address && address !== 'NULL' && address.trim() !== '') {
+          try {
+            const parsedAddress = JSON.parse(address);
+            locations.push({
+              id: `other_${index}`,
+              name: parsedAddress.name || `Location ${index + 1}`,
+              address: parsedAddress.address,
+              latitude: parsedAddress.latitude || null,
+              longitude: parsedAddress.longitude || null,
+              is_primary: false
+            });
+          } catch (e) {
+            // If it's not JSON, treat as simple address string
+            locations.push({
+              id: `other_${index}`,
+              name: `Location ${index + 1}`,
+              address: address,
+              latitude: null,
+              longitude: null,
+              is_primary: false
+            });
+          }
+        }
+      });
+    }
+
+    res.json({ locations });
+  } catch (err) {
+    console.error('Server error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /locations - Add a new saved location
+app.post('/locations', authenticateToken, async (req, res) => {
+  try {
+    const { user_id } = req.user;
+    const { name, address, latitude, longitude } = req.body;
+
+    // Validation
+    if (!name || !address) {
+      return res.status(400).json({ 
+        error: 'Name and address are required' 
+      });
+    }
+
+    // Validate coordinates if provided
+    if (latitude !== undefined && longitude !== undefined) {
+      if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+        return res.status(400).json({ 
+          error: 'Invalid coordinates' 
+        });
+      }
+    }
+
+    // Get current other_addresses
+    const { data: user, error: fetchError } = await supabase
+      .from('users')
+      .select('other_addresses')
+      .eq('id', user_id)
+      .single();
+
+    if (fetchError) {
+      console.error('Fetch error:', fetchError);
+      return res.status(500).json({ error: 'Failed to fetch user data' });
+    }
+
+    // Prepare new location object
+    const newLocation = {
+      name: name.trim(),
+      address: address.trim(),
+      latitude: latitude ? parseFloat(latitude) : null,
+      longitude: longitude ? parseFloat(longitude) : null,
+      created_at: new Date().toISOString()
+    };
+
+    // Get existing addresses or initialize empty array
+    let otherAddresses = user.other_addresses || [];
+    
+    // Filter out NULL values
+    otherAddresses = otherAddresses.filter(addr => addr && addr !== 'NULL' && addr.trim() !== '');
+
+    // Add new location as JSON string
+    otherAddresses.push(JSON.stringify(newLocation));
+
+    // Update the database
+    const { error: updateError } = await supabase
+      .from('users')
+      .update({ other_addresses: otherAddresses })
+      .eq('id', user_id);
+
+    if (updateError) {
+      console.error('Update error:', updateError);
+      return res.status(500).json({ error: 'Failed to add location' });
+    }
+
+    res.status(201).json({ 
+      message: 'Location added successfully',
+      location: {
+        id: `other_${otherAddresses.length - 1}`,
+        ...newLocation,
+        is_primary: false
+      }
+    });
+  } catch (err) {
+    console.error('Server error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// DELETE /locations/:id - Delete a saved location
+app.delete('/locations/:id', authenticateToken, async (req, res) => {
+  try {
+    const { user_id } = req.user;
+    const { id } = req.params;
+
+    // Can't delete home address
+    if (id === 'home') {
+      return res.status(400).json({ error: 'Cannot delete home address' });
+    }
+
+    // Extract index from id (format: "other_0", "other_1", etc.)
+    if (!id.startsWith('other_')) {
+      return res.status(400).json({ error: 'Invalid location ID' });
+    }
+
+    const index = parseInt(id.split('_')[1]);
+    if (isNaN(index)) {
+      return res.status(400).json({ error: 'Invalid location ID' });
+    }
+
+    // Get current other_addresses
+    const { data: user, error: fetchError } = await supabase
+      .from('users')
+      .select('other_addresses')
+      .eq('id', user_id)
+      .single();
+
+    if (fetchError) {
+      console.error('Fetch error:', fetchError);
+      return res.status(500).json({ error: 'Failed to fetch user data' });
+    }
+
+    let otherAddresses = user.other_addresses || [];
+    
+    // Filter out NULL values
+    otherAddresses = otherAddresses.filter(addr => addr && addr !== 'NULL' && addr.trim() !== '');
+
+    // Check if index is valid
+    if (index < 0 || index >= otherAddresses.length) {
+      return res.status(404).json({ error: 'Location not found' });
+    }
+
+    // Remove the location at the specified index
+    otherAddresses.splice(index, 1);
+
+    // Update the database
+    const { error: updateError } = await supabase
+      .from('users')
+      .update({ other_addresses: otherAddresses })
+      .eq('id', user_id);
+
+    if (updateError) {
+      console.error('Update error:', updateError);
+      return res.status(500).json({ error: 'Failed to delete location' });
+    }
+
+    res.json({ message: 'Location deleted successfully' });
+  } catch (err) {
+    console.error('Server error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PUT /locations/:id - Update a saved location
+app.put('/locations/:id', authenticateToken, async (req, res) => {
+  try {
+    const { user_id } = req.user;
+    const { id } = req.params;
+    const { name, address, latitude, longitude } = req.body;
+
+    // Validation
+    if (!name || !address) {
+      return res.status(400).json({ 
+        error: 'Name and address are required' 
+      });
+    }
+
+    // Validate coordinates if provided
+    if (latitude !== undefined && longitude !== undefined) {
+      if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+        return res.status(400).json({ 
+          error: 'Invalid coordinates' 
+        });
+      }
+    }
+
+    // Can't update home address through this endpoint
+    if (id === 'home') {
+      return res.status(400).json({ error: 'Use profile endpoint to update home address' });
+    }
+
+    // Extract index from id
+    if (!id.startsWith('other_')) {
+      return res.status(400).json({ error: 'Invalid location ID' });
+    }
+
+    const index = parseInt(id.split('_')[1]);
+    if (isNaN(index)) {
+      return res.status(400).json({ error: 'Invalid location ID' });
+    }
+
+    // Get current other_addresses
+    const { data: user, error: fetchError } = await supabase
+      .from('users')
+      .select('other_addresses')
+      .eq('id', user_id)
+      .single();
+
+    if (fetchError) {
+      console.error('Fetch error:', fetchError);
+      return res.status(500).json({ error: 'Failed to fetch user data' });
+    }
+
+    let otherAddresses = user.other_addresses || [];
+    
+    // Filter out NULL values
+    otherAddresses = otherAddresses.filter(addr => addr && addr !== 'NULL' && addr.trim() !== '');
+
+    // Check if index is valid
+    if (index < 0 || index >= otherAddresses.length) {
+      return res.status(404).json({ error: 'Location not found' });
+    }
+
+    // Prepare updated location object
+    const updatedLocation = {
+      name: name.trim(),
+      address: address.trim(),
+      latitude: latitude ? parseFloat(latitude) : null,
+      longitude: longitude ? parseFloat(longitude) : null,
+      updated_at: new Date().toISOString()
+    };
+
+    // Update the location at the specified index
+    otherAddresses[index] = JSON.stringify(updatedLocation);
+
+    // Update the database
+    const { error: updateError } = await supabase
+      .from('users')
+      .update({ other_addresses: otherAddresses })
+      .eq('id', user_id);
+
+    if (updateError) {
+      console.error('Update error:', updateError);
+      return res.status(500).json({ error: 'Failed to update location' });
+    }
+
+    res.json({ 
+      message: 'Location updated successfully',
+      location: {
+        id,
+        ...updatedLocation,
+        is_primary: false
+      }
+    });
+  } catch (err) {
+    console.error('Server error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /call
+// Replace the existing /emergency/call route in your backend index.js
+
+app.post("/emergency/call", authenticateToken, async (req, res) => {
+  try {
+    const { user_id } = req.user;
+    const { contactId } = req.body; // Accept contactId from frontend
+
+    // Get user's profile from Supabase to get emergency contacts
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('primary_emergency_phone, primary_emergency_contact, secondary_emergency_phone, secondary_emergency_contact, emergency_calls')
+      .eq('id', user_id)
+      .single();
+
+    if (error || !user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Select contact based on contactId
+    let contactPhone, contactName;
+    
+    if (contactId === 2 || contactId === '2') {
+      // Secondary contact
+      contactPhone = user.secondary_emergency_phone;
+      contactName = user.secondary_emergency_contact;
+      
+      if (!contactPhone || !contactName) {
+        return res.status(400).json({ error: 'No secondary emergency contact found' });
+      }
+    } else {
+      // Primary contact (default)
+      contactPhone = user.primary_emergency_phone;
+      contactName = user.primary_emergency_contact;
+      
+      if (!contactPhone || !contactName) {
+        return res.status(400).json({ error: 'No primary emergency contact found' });
+      }
+    }
+
+    // Format phone number
+    let formattedPhone = contactPhone.replace(/\D/g, '');
+    if (formattedPhone.startsWith('91') && formattedPhone.length === 12) {
+      formattedPhone = '+' + formattedPhone;
+    } else if (formattedPhone.length === 10) {
+      formattedPhone = '+91' + formattedPhone;
+    } else {
+      return res.status(400).json({ error: 'Invalid emergency contact phone format' });
+    }
+
+    // Call the selected emergency contact
+    const call = await client.calls.create({
+      from: process.env.TWILIO_PHONE,
+      to: formattedPhone,
+      twiml: `<Response><Say>This is an emergency call triggered by ${contactName}. Please respond immediately.</Say></Response>`
+    });
+
+    // Increment emergency calls count
+    const newCount = (user.emergency_calls || 0) + 1;
+    await supabase
+      .from('users')
+      .update({ emergency_calls: newCount })
+      .eq('id', user_id);
+
+    console.log(`Emergency call made to ${contactName} (${contactPhone}): ${call.sid}`);
+
+    res.json({ 
+      success: true, 
+      sid: call.sid, 
+      emergency_calls: newCount,
+      contact: contactName,
+      contactType: contactId === 2 || contactId === '2' ? 'Secondary' : 'Primary'
+    });
+
+  } catch (err) {
+    console.error("Error making emergency call:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Add these routes to your index.js backend file
+
+// Route to search for route to a pincode
+app.post('/route/search', authenticateToken, async (req, res) => {
+  try {
+    const { fromLat, fromLng, toPincode } = req.body;
+
+    if (!fromLat || !fromLng || !toPincode) {
+      return res.status(400).json({ error: 'Missing required parameters' });
+    }
+
+    // Validate pincode format
+    if (!/^\d{6}$/.test(toPincode)) {
+      return res.status(400).json({ error: 'Invalid pincode format' });
+    }
+
+    // Geocode the pincode to get destination coordinates
+    const geocodeResponse = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${toPincode}&countrycodes=IN&limit=1`
+    );
+    const geocodeData = await geocodeResponse.json();
+
+    if (!geocodeData || geocodeData.length === 0) {
+      return res.status(404).json({ error: 'Pincode not found' });
+    }
+
+    const destination = {
+      lat: parseFloat(geocodeData[0].lat),
+      lng: parseFloat(geocodeData[0].lon),
+      address: geocodeData[0].display_name
+    };
+
+    // You can also calculate distance here if needed
+    const distance = calculateDistance(fromLat, fromLng, destination.lat, destination.lng);
+
+    res.json({
+      success: true,
+      origin: { lat: fromLat, lng: fromLng },
+      destination: destination,
+      distance: distance,
+      pincode: toPincode
+    });
+
+  } catch (error) {
+    console.error('Route search error:', error);
+    res.status(500).json({ error: 'Failed to search route' });
+  }
+});
+
+// Route to send location via SMS using Twilio
+app.post('/location/send-sms', authenticateToken, async (req, res) => {
+  try {
+    const { contactId, latitude, longitude } = req.body;
+
+    if (!contactId || !latitude || !longitude) {
+      return res.status(400).json({ error: 'Missing required parameters' });
+    }
+
+    // Get user's profile from Supabase
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', req.user.user_id)
+      .single();
+
+    if (error || !user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    let contactName, contactPhone;
+
+    // Determine which contact to send to
+    if (contactId === '1' || contactId === 1) {
+      contactName = user.primary_emergency_contact;
+      contactPhone = user.primary_emergency_phone;
+    } else if (contactId === '2' || contactId === 2) {
+      contactName = user.secondary_emergency_contact;
+      contactPhone = user.secondary_emergency_phone;
+    } else {
+      return res.status(400).json({ error: 'Invalid contact ID' });
+    }
+
+    if (!contactName || !contactPhone) {
+      return res.status(400).json({ error: 'Contact not found or incomplete' });
+    }
+
+    // Format phone number for Twilio (ensure it has country code)
+    let formattedPhone = contactPhone.replace(/\D/g, ''); // Remove non-digits
+    if (formattedPhone.startsWith('91') && formattedPhone.length === 12) {
+      formattedPhone = '+' + formattedPhone;
+    } else if (formattedPhone.length === 10) {
+      formattedPhone = '+91' + formattedPhone;
+    } else {
+      return res.status(400).json({ error: 'Invalid phone number format' });
+    }
+
+    // Reverse geocode to get pincode/area info
+    let locationInfo = `${latitude}, ${longitude}`;
+    try {
+      const geocodeResponse = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=10`
+      );
+      const geocodeData = await geocodeResponse.json();
+      
+      if (geocodeData && geocodeData.address) {
+        const address = geocodeData.address;
+        const pincode = address.postcode;
+        const city = address.city || address.town || address.village;
+        const state = address.state;
+        
+        if (pincode) {
+          locationInfo = `${city || 'Unknown Area'}, ${state || 'India'} - ${pincode}`;
+        } else if (city) {
+          locationInfo = `${city}, ${state || 'India'}`;
+        }
+      }
+    } catch (geocodeError) {
+      console.log('Geocoding failed, using coordinates:', geocodeError.message);
+      // Will use coordinates as fallback
+    }
+
+    // Create simple location message without URL
+    const locationMessage = `EMERGENCY ALERT from ${user.first_name} ${user.last_name}. Location: ${locationInfo}. Coordinates: ${latitude}, ${longitude}. Please respond immediately.`;
+
+    console.log('Sending SMS to formatted phone:', formattedPhone);
+    console.log('Original phone from database:', contactPhone);
+    console.log('Message content:', locationMessage);
+
+    // Send SMS using Twilio
+    const message = await client.messages.create({
+      body: locationMessage,
+      from: process.env.TWILIO_PHONE,
+      to: formattedPhone
+    });
+
+    console.log(`Location SMS sent to ${contactName}: ${message.sid}`);
+
+    res.json({
+      success: true,
+      contactName: contactName,
+      phone: contactPhone,
+      messageSid: message.sid,
+      locationInfo: locationInfo,
+      message: 'Location sent successfully via SMS'
+    });
+
+  } catch (error) {
+    console.error('SMS sending error:', error);
+    res.status(500).json({ error: 'Failed to send location SMS' });
+  }
+});
+
+// Helper function to calculate distance between two coordinates (Haversine formula)
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371; // Earth's radius in kilometers
+  const dLat = deg2rad(lat2 - lat1);
+  const dLon = deg2rad(lon2 - lon1);
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  const distance = R * c; // Distance in kilometers
+  return Math.round(distance * 100) / 100; // Round to 2 decimal places
+}
+
+function deg2rad(deg) {
+  return deg * (Math.PI/180);
+}
+
+// Additional route to get route details (optional - for more detailed routing)
+app.post('/route/details', authenticateToken, async (req, res) => {
+  try {
+    const { fromLat, fromLng, toLat, toLng } = req.body;
+
+    if (!fromLat || !fromLng || !toLat || !toLng) {
+      return res.status(400).json({ error: 'Missing coordinates' });
+    }
+
+    // You can integrate with routing services like OpenRouteService or MapBox here
+    // For now, we'll return basic details
+    const distance = calculateDistance(fromLat, fromLng, toLat, toLng);
+    const estimatedTime = Math.round((distance / 50) * 60); // Rough estimate: 50 km/h average speed
+
+    res.json({
+      success: true,
+      distance: distance,
+      estimatedTime: estimatedTime,
+      googleMapsUrl: `https://www.google.com/maps/dir/${fromLat},${fromLng}/${toLat},${toLng}`
+    });
+
+  } catch (error) {
+    console.error('Route details error:', error);
+    res.status(500).json({ error: 'Failed to get route details' });
+  }
+});
+
+// Route to send bulk location alerts to all emergency contacts
+app.post('/location/send-emergency-alert', authenticateToken, async (req, res) => {
+  try {
+    const { latitude, longitude, emergencyType = 'GENERAL' } = req.body;
+
+    if (!latitude || !longitude) {
+      return res.status(400).json({ error: 'Location coordinates required' });
+    }
+
+    // Get user's profile from Supabase
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', req.user.user_id)
+      .single();
+
+    if (error || !user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const contacts = [];
+    const results = [];
+
+    // Add primary contact
+    if (user.primary_emergency_contact && user.primary_emergency_phone) {
+      contacts.push({
+        name: user.primary_emergency_contact,
+        phone: user.primary_emergency_phone,
+        relation: user.primary_emergency_relation || 'Primary'
+      });
+    }
+
+    // Add secondary contact
+    if (user.secondary_emergency_contact && user.secondary_emergency_phone) {
+      contacts.push({
+        name: user.secondary_emergency_contact,
+        phone: user.secondary_emergency_phone,
+        relation: user.secondary_emergency_relation || 'Secondary'
+      });
+    }
+
+    if (contacts.length === 0) {
+      return res.status(400).json({ error: 'No emergency contacts configured' });
+    }
+
+    // Send SMS to all contacts
+    for (const contact of contacts) {
+      try {
+        let formattedPhone = contact.phone.replace(/\D/g, '');
+        if (formattedPhone.startsWith('91') && formattedPhone.length === 12) {
+          formattedPhone = '+' + formattedPhone;
+        } else if (formattedPhone.length === 10) {
+          formattedPhone = '+91' + formattedPhone;
+        } else {
+          results.push({
+            contact: contact.name,
+            status: 'failed',
+            error: 'Invalid phone format'
+          });
+          continue;
+        }
+
+        const googleMapsLink = `https://maps.google.com/?q=${latitude},${longitude}`;
+        const alertMessage = `🚨 ${emergencyType} EMERGENCY ALERT 🚨\n\nFrom: ${user.first_name} ${user.last_name}\nTime: ${new Date().toLocaleString()}\nLocation: ${latitude}, ${longitude}\n\nView location: ${googleMapsLink}\n\nPlease respond immediately. This is an automated emergency alert.`;
+
+        const message = await client.messages.create({
+          body: alertMessage,
+          from: process.env.TWILIO_PHONE,
+          to: formattedPhone
+        });
+
+        results.push({
+          contact: contact.name,
+          phone: contact.phone,
+          status: 'sent',
+          messageSid: message.sid
+        });
+
+      } catch (error) {
+        console.error(`Failed to send SMS to ${contact.name}:`, error);
+        results.push({
+          contact: contact.name,
+          status: 'failed',
+          error: error.message
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      alertType: emergencyType,
+      contactsNotified: results.filter(r => r.status === 'sent').length,
+      totalContacts: contacts.length,
+      results: results
+    });
+
+  } catch (error) {
+    console.error('Emergency alert error:', error);
+    res.status(500).json({ error: 'Failed to send emergency alerts' });
+  }
+});
 
 
 
