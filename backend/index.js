@@ -17,20 +17,6 @@ const app = express()
 app.use(cors())
 app.use(express.json())
 
-const requiredEnvVars = [
-  'SUPABASE_URL',
-  'SUPABASE_KEY',
-  'JWT_SECRET',
-  'TWILIO_ACCOUNT_SID',
-  'TWILIO_AUTH_TOKEN',
-]
-for (const envVar of requiredEnvVars) {
-  if (!process.env[envVar]) {
-    console.error(`Missing required environment variable: ${envVar}`)
-    process.exit(1)
-  }
-}
-
 const PORT = process.env.PORT || 8000
 
 // Replace the simple upload configuration
@@ -230,15 +216,12 @@ app.post('/verify_otp', async (req, res) => {
     console.log(req.phone, req.otp)
     const record = otpStore[phone]
 
-    if (!record) {
+    if (!record)
       return res.status(400).json({ error: 'OTP not requested or expired' })
-    }
-
-    if (record.otp !== otp || Date.now() > record.expiresAt) {
+    if (record.otp !== otp || Date.now() > record.expiresAt)
       return res.status(400).json({ error: 'Invalid or expired OTP' })
-    }
 
-    const hashedPassword = await bcrypt.hash(record.userData.password, 12)
+    const hashedPassword = await bcrypt.hash(record.userData.password, 10)
     const encryptedMedical = encrypt(record.userData.medical_conditions)
 
     const { error, data } = await supabase
@@ -280,23 +263,14 @@ app.post('/verify_otp', async (req, res) => {
     delete otpStore[phone]
 
     const token = jwt.sign(
-      {
-        user_id: data.id,
-        email: data.email,
-        userType: 'user',
-      },
+      { user_id: data.id, email: data.email },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     )
 
     res.json({
       message: 'User registered successfully',
-      user: {
-        id: data.id,
-        email: data.email,
-        first_name: data.first_name,
-        userType: 'user',
-      },
+      user: { id: data.id, email: data.email, first_name: data.first_name },
       token,
     })
   } catch (err) {
@@ -308,97 +282,32 @@ app.post('/verify_otp', async (req, res) => {
 // 3️⃣ Login
 app.post('/login', async (req, res) => {
   try {
-    const { email, password, userType } = req.body
+    const { email, password } = req.body
+    if (!email || !password)
+      return res.status(400).json({ error: 'Email and password are required' })
 
-    if (!email || !password || !userType) {
-      return res.status(400).json({
-        error: 'Email, password, and user type are required',
-      })
-    }
-
-    // Admin login - check from admin_users table
-    if (userType === 'admin') {
-      const { data: admin, error: adminError } = await supabase
-        .from('admin_users')
-        .select('*')
-        .eq('email', email)
-        .eq('is_active', true)
-        .single()
-
-      if (adminError || !admin) {
-        return res.status(401).json({ error: 'Invalid admin credentials' })
-      }
-
-      const isValidAdmin = await bcrypt.compare(password, admin.password_hash)
-      if (!isValidAdmin) {
-        return res.status(401).json({ error: 'Invalid admin credentials' })
-      }
-
-      // Update last login timestamp
-      await supabase
-        .from('admin_users')
-        .update({ last_login: new Date().toISOString() })
-        .eq('id', admin.id)
-
-      const token = jwt.sign(
-        {
-          user_id: admin.id,
-          email: admin.email,
-          userType: 'admin',
-          role: admin.role || 'admin',
-        },
-        process.env.JWT_SECRET,
-        { expiresIn: '7d' }
-      )
-
-      return res.json({
-        message: 'Admin login successful',
-        user: {
-          id: admin.id,
-          email: admin.email,
-          first_name: admin.first_name,
-          last_name: admin.last_name,
-          role: admin.role || 'admin',
-          userType: 'admin',
-        },
-        token,
-      })
-    }
-
-    // Regular user login
     const { data: user, error } = await supabase
       .from('users')
       .select('*')
       .eq('email', email)
       .single()
 
-    if (error || !user) {
+    if (error || !user)
       return res.status(401).json({ error: 'Invalid email or password' })
-    }
 
     const isValid = await bcrypt.compare(password, user.password_hash)
-    if (!isValid) {
+    if (!isValid)
       return res.status(401).json({ error: 'Invalid email or password' })
-    }
 
     const token = jwt.sign(
-      {
-        user_id: user.id,
-        email: user.email,
-        userType: 'user',
-      },
+      { user_id: user.id, email: user.email },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     )
 
     res.json({
       message: 'Login successful',
-      user: {
-        id: user.id,
-        email: user.email,
-        first_name: user.first_name,
-        userType: 'user',
-      },
+      user: { id: user.id, email: user.email, first_name: user.first_name },
       token,
     })
   } catch (err) {

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import './VoiceRecorder.css' // ✅ Import recorder CSS
-import VoiceRecorder from './voiceRecorder'
+import './voiceRecorder.css' // ✅ Import recorder CSS
+import VoiceRecorder from './voiceRecorder.js'
 import './ChatPage.css'
 
 function ChatPage() {
@@ -79,43 +79,110 @@ function ChatPage() {
     }
   }
 
+  const handleEmergencyCall = () => {
+    window.location.href = 'tel:911'
+  }
+
   const quickResponses = [
-    'I need help',
-    'Call police',
-    'Nearest hospital',
-    'Emergency number',
+    'I need help with first aid',
+    'How do I call emergency services?',
+    "I'm having chest pain",
+    "There's a fire",
+    'I need mental health support',
+    "I'm lost and need location help",
   ]
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
-
   return (
-    <div className="chat-container">
-      <div className="chat-header">🚨 Emergency Chat Assistant</div>
-
-      <div className="chat-messages">
-        {messages.map((message, idx) => (
-          <div
-            key={idx}
-            className={`chat-message ${
-              message.sender === 'user' ? 'user' : 'ai'
-            }`}
-          >
-            <div className="message-text">{message.text}</div>
-            <div className="message-time">
-              {new Date(message.timestamp).toLocaleTimeString([], {
-                hour: '2-digit',
-                minute: '2-digit',
-              })}
-            </div>
+    <div className="chat-page">
+      {/* Header */}
+      <header className="chat-header">
+        <div className="chat-header-content">
+          <button className="back-button" onClick={() => navigate('/')}>
+            ← Back
+          </button>
+          <div className="chat-title">
+            <h1>🤖 Emergency AI Assistant</h1>
+            <span className="chat-status">Online • Ready to help</span>
           </div>
-        ))}
-        {isTyping && <div className="typing-indicator">AI is typing...</div>}
-        <div ref={messagesEndRef} />
+          <button className="emergency-call-btn" onClick={handleEmergencyCall}>
+            🚨 Call 911
+          </button>
+        </div>
+      </header>
+
+      {/* Emergency Alert */}
+      {isEmergency && (
+        <div className="emergency-alert">
+          <div className="emergency-alert-content">
+            <span className="emergency-icon">🚨</span>
+            <div className="emergency-text">
+              <strong>Emergency Detected</strong>
+              <p>
+                If this is a life-threatening emergency, call 911 immediately
+              </p>
+            </div>
+            <button
+              className="emergency-dismiss"
+              onClick={() => setIsEmergency(false)}
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Chat Messages */}
+      <div className="chat-container">
+        <div className="messages-container">
+          {messages.map((message) => (
+            <div
+              key={message.id}
+              className={`message ${message.sender} ${
+                message.isUrgent ? 'urgent' : ''
+              }`}
+            >
+              <div className="message-content">
+                <div className="message-avatar">
+                  {message.sender === 'ai' ? '🤖' : '👤'}
+                </div>
+                <div className="message-bubble">
+                  <div className="message-text">
+                    {message.text.split('\n').map((line, index) => (
+                      <div key={index}>{line}</div>
+                    ))}
+                  </div>
+                  <div className="message-time">
+                    {message.timestamp.toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {/* Typing Indicator */}
+          {isTyping && (
+            <div className="message ai">
+              <div className="message-content">
+                <div className="message-avatar">🤖</div>
+                <div className="message-bubble typing">
+                  <div className="typing-indicator">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div ref={messagesEndRef} />
+        </div>
       </div>
 
-      {/* Quick response buttons */}
+      {/* Quick Response Buttons */}
       <div className="quick-responses">
         <div className="quick-responses-container">
           {quickResponses.map((text, idx) => (
@@ -140,16 +207,22 @@ function ChatPage() {
             onKeyPress={handleKeyPress}
             placeholder="Type your message here... For emergencies, call 911 immediately."
             rows="1"
+            disabled={isTyping} // ✅ block typing while AI responds
           />
           <button
             className="send-button"
-            onClick={handleSendMessage}
-            disabled={inputText.trim() === ''}
+            onClick={() => handleSendMessage()}
+            disabled={inputText.trim() === '' || isTyping} // ✅ disable send while typing
           >
             <span className="send-icon">➤</span>
           </button>
+
+          {/* 🎤 Voice Recorder support */}
+          <VoiceRecorder onSendAudio={handleSendMessage} />
         </div>
       </div>
     </div>
   )
 }
+
+export default ChatPage
