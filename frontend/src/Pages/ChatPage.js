@@ -1,71 +1,81 @@
-import { useState, useEffect, useRef } from 'react'
-import './ChatPage.css'
+import React, { useState, useRef, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import './VoiceRecorder.css' // ✅ Import recorder CSS
-import VoiceRecorder from './VoiceRecorder'
+import VoiceRecorder from './voiceRecorder'
+import './ChatPage.css'
 
-export default function ChatPage() {
-  const [messages, setMessages] = useState([])
+function ChatPage() {
+  const [messages, setMessages] = useState([
+    {
+      id: 1,
+      text: "Hello! I'm your Emergency Response AI Assistant. How can I help you today? I can assist with emergency information, safety tips, first aid guidance, and connecting you with appropriate services.",
+      sender: 'ai',
+      timestamp: new Date(),
+    },
+  ])
   const [inputText, setInputText] = useState('')
   const [isTyping, setIsTyping] = useState(false)
+  const [isEmergency, setIsEmergency] = useState(false)
   const messagesEndRef = useRef(null)
+  const navigate = useNavigate()
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  useEffect(() => {
+    scrollToBottom()
+  }, [messages])
+
+  // ---- Single handleSendMessage that calls backend ----
 
   async function handleSendMessage(textOverride = null) {
-    const messageText = textOverride ?? inputText
-    if (!messageText.trim()) return
+    const messageText = String(textOverride ?? inputText).trim() // ✅ always a string
+    if (!messageText) return
 
     const newMessage = {
       text: messageText,
       sender: 'user',
       timestamp: new Date(),
     }
+
     setMessages((prev) => [...prev, newMessage])
     setInputText('')
     setIsTyping(true)
 
     try {
-      // ✅ Call Grok API for AI response
-      const res = await fetch('https://api.x.ai/v1/chat/completions', {
+      const res = await fetch('http://localhost:8000/chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${process.env.REACT_APP_GROK_API_KEY}`, // ✅ Store API key in .env
-        },
-        body: JSON.stringify({
-          model: 'grok-beta',
-          messages: [
-            {
-              role: 'system',
-              content: 'You are an emergency chatbot assistant.',
-            },
-            ...messages.map((m) => ({
-              role: m.sender === 'user' ? 'user' : 'assistant',
-              content: m.text,
-            })),
-            { role: 'user', content: messageText },
-          ],
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: messageText }), // ✅ safe
       })
 
       const data = await res.json()
-      const aiResponse =
-        data.choices?.[0]?.message?.content || '⚠️ No response from AI.'
+      const aiResponse = data.reply || '⚠️ Sorry, I could not process that.'
 
       setMessages((prev) => [
         ...prev,
         { text: aiResponse, sender: 'ai', timestamp: new Date() },
       ])
     } catch (error) {
-      console.error('Error fetching Grok response:', error)
+      console.error('Error fetching AI response:', error)
       setMessages((prev) => [
         ...prev,
         {
-          text: '⚠️ Unable to connect to Grok. Please try again.',
+          text: '⚠️ Network error. Please try again.',
           sender: 'ai',
           timestamp: new Date(),
         },
       ])
     } finally {
       setIsTyping(false)
+    }
+  }
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSendMessage()
     }
   }
 
@@ -107,31 +117,38 @@ export default function ChatPage() {
 
       {/* Quick response buttons */}
       <div className="quick-responses">
-        {quickResponses.map((response, idx) => (
-          <button
-            key={idx}
-            onClick={() => handleSendMessage(response)}
-            className="quick-btn"
-          >
-            {response}
-          </button>
-        ))}
+        <div className="quick-responses-container">
+          {quickResponses.map((text, idx) => (
+            <button
+              key={idx}
+              className="quick-response-btn"
+              onClick={() => handleSendMessage(text)} // ✅ directly sends
+            >
+              {text}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Input + Voice */}
-      <div className="chat-input-container">
-        <input
-          type="text"
-          value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-          placeholder="Type a message..."
-          disabled={isTyping}
-        />
-        <button onClick={() => handleSendMessage()} disabled={isTyping}>
-          Send
-        </button>
-        {/* 🎤 Voice Recorder */}
-        <VoiceRecorder onSendAudio={handleSendMessage} />
+      {/* Input Area */}
+      <div className="chat-input-area">
+        <div className="chat-input-container">
+          <textarea
+            className="chat-input"
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            onKeyPress={handleKeyPress}
+            placeholder="Type your message here... For emergencies, call 911 immediately."
+            rows="1"
+          />
+          <button
+            className="send-button"
+            onClick={handleSendMessage}
+            disabled={inputText.trim() === ''}
+          >
+            <span className="send-icon">➤</span>
+          </button>
+        </div>
       </div>
     </div>
   )
