@@ -7,12 +7,29 @@ const twilio = require('twilio')
 const crypto = require('crypto')
 const { createClient } = require('@supabase/supabase-js')
 const jwt = require('jsonwebtoken')
-const Groq = require('groq-sdk')   // 👈 Import Groq SDK
-
+const Groq = require('groq-sdk')
+const multer = require('multer')
+const fs = require('fs')
+const path = require('path')
+const { spawn } = require('child_process')
 dotenv.config()
 const app = express()
 app.use(cors())
 app.use(express.json())
+
+const requiredEnvVars = [
+  'SUPABASE_URL',
+  'SUPABASE_KEY',
+  'JWT_SECRET',
+  'TWILIO_ACCOUNT_SID',
+  'TWILIO_AUTH_TOKEN',
+]
+for (const envVar of requiredEnvVars) {
+  if (!process.env[envVar]) {
+    console.error(`Missing required environment variable: ${envVar}`)
+    process.exit(1)
+  }
+}
 
 const PORT = process.env.PORT || 8000
 
@@ -83,6 +100,22 @@ function authenticateToken(req, res, next) {
   })
 }
 
+// Admin authentication middleware
+function authenticateAdmin(req, res, next) {
+  const authHeader = req.headers['authorization']
+  const token = authHeader && authHeader.split(' ')[1]
+  if (!token) return res.status(401).json({ error: 'Admin access required' })
+
+  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ error: 'Invalid admin token' })
+    if (user.userType !== 'admin') {
+      return res.status(403).json({ error: 'Admin privileges required' })
+    }
+    req.user = user
+    next()
+  })
+}
+
 // --------------------
 // Routes
 // --------------------
@@ -100,13 +133,19 @@ app.post('/chat', async (req, res) => {
     // Send to Groq
     const completion = await groq.chat.completions.create({
       messages: [
-        { role: 'system', content: 'You are a helpful assistant for emergencies and general queries.' },
-        { role: 'user', content: message }
+        {
+          role: 'system',
+          content:
+            'You are a helpful assistant for emergencies and general queries.',
+        },
+        { role: 'user', content: message },
       ],
       model: 'llama-3.1-8b-instant', // fast and good for chat
     })
 
-    const reply = completion.choices[0]?.message?.content || 'Sorry, I could not generate a response.'
+    const reply =
+      completion.choices[0]?.message?.content ||
+      'Sorry, I could not generate a response.'
 
     res.json({ reply })
   } catch (err) {
@@ -131,14 +170,14 @@ app.post('/send_otp', async (req, res) => {
       expiresAt: Date.now() + 5 * 60 * 1000,
       userData: { ...userData, phone, password, medical_conditions },
     }
-    console.log(otpStore);
+    console.log(otpStore)
 
     await client.messages.create({
       body: `Your OTP is ${otp}`,
       from: process.env.TWILIO_PHONE,
       to: phone,
     })
- 
+
     res.json({ message: 'OTP sent successfully' })
   } catch (err) {
     console.error('Twilio error:', err)
@@ -146,21 +185,22 @@ app.post('/send_otp', async (req, res) => {
   }
 })
 
-
-
 // 2️⃣ Verify OTP & Register
 app.post('/verify_otp', async (req, res) => {
   try {
     const { phone, otp } = req.body
-    console.log(req.phone,req.otp);
+    console.log(req.phone, req.otp)
     const record = otpStore[phone]
 
-    if (!record)
-      return res.status(400).json({ error: 'OTP not requested or expired'})
-    if (record.otp !== otp || Date.now() > record.expiresAt)
-      return res.status(400).json({ error: 'Invalid or expired OTP' })
+    if (!record) {
+      return res.status(400).json({ error: 'OTP not requested or expired' })
+    }
 
-    const hashedPassword = await bcrypt.hash(record.userData.password, 10)
+    if (record.otp !== otp || Date.now() > record.expiresAt) {
+      return res.status(400).json({ error: 'Invalid or expired OTP' })
+    }
+
+    const hashedPassword = await bcrypt.hash(record.userData.password, 12)
     const encryptedMedical = encrypt(record.userData.medical_conditions)
 
     const { error, data } = await supabase
@@ -202,14 +242,23 @@ app.post('/verify_otp', async (req, res) => {
     delete otpStore[phone]
 
     const token = jwt.sign(
-      { user_id: data.id, email: data.email },
+      {
+        user_id: data.id,
+        email: data.email,
+        userType: 'user',
+      },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     )
 
     res.json({
       message: 'User registered successfully',
-      user: { id: data.id, email: data.email, first_name: data.first_name },
+      user: {
+        id: data.id,
+        email: data.email,
+        first_name: data.first_name,
+        userType: 'user',
+      },
       token,
     })
   } catch (err) {
@@ -221,32 +270,97 @@ app.post('/verify_otp', async (req, res) => {
 // 3️⃣ Login
 app.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body
-    if (!email || !password)
-      return res.status(400).json({ error: 'Email and password are required' })
+    const { email, password, userType } = req.body
 
+    if (!email || !password || !userType) {
+      return res.status(400).json({
+        error: 'Email, password, and user type are required',
+      })
+    }
+
+    // Admin login - check from admin_users table
+    if (userType === 'admin') {
+      const { data: admin, error: adminError } = await supabase
+        .from('admin_users')
+        .select('*')
+        .eq('email', email)
+        .eq('is_active', true)
+        .single()
+
+      if (adminError || !admin) {
+        return res.status(401).json({ error: 'Invalid admin credentials' })
+      }
+
+      const isValidAdmin = await bcrypt.compare(password, admin.password_hash)
+      if (!isValidAdmin) {
+        return res.status(401).json({ error: 'Invalid admin credentials' })
+      }
+
+      // Update last login timestamp
+      await supabase
+        .from('admin_users')
+        .update({ last_login: new Date().toISOString() })
+        .eq('id', admin.id)
+
+      const token = jwt.sign(
+        {
+          user_id: admin.id,
+          email: admin.email,
+          userType: 'admin',
+          role: admin.role || 'admin',
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: '7d' }
+      )
+
+      return res.json({
+        message: 'Admin login successful',
+        user: {
+          id: admin.id,
+          email: admin.email,
+          first_name: admin.first_name,
+          last_name: admin.last_name,
+          role: admin.role || 'admin',
+          userType: 'admin',
+        },
+        token,
+      })
+    }
+
+    // Regular user login
     const { data: user, error } = await supabase
       .from('users')
       .select('*')
       .eq('email', email)
       .single()
 
-    if (error || !user)
+    if (error || !user) {
       return res.status(401).json({ error: 'Invalid email or password' })
+    }
 
     const isValid = await bcrypt.compare(password, user.password_hash)
-    if (!isValid)
+    if (!isValid) {
       return res.status(401).json({ error: 'Invalid email or password' })
+    }
 
     const token = jwt.sign(
-      { user_id: user.id, email: user.email },
+      {
+        user_id: user.id,
+        email: user.email,
+        userType: 'user',
+      },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     )
 
     res.json({
       message: 'Login successful',
-      user: { id: user.id, email: user.email, first_name: user.first_name },
+      user: {
+        id: user.id,
+        email: user.email,
+        first_name: user.first_name,
+        userType: 'user',
+      },
       token,
     })
   } catch (err) {
@@ -268,7 +382,6 @@ app.post('/resend_otp', async (req, res) => {
   try {
     const { phone } = req.body
     const record = otpStore[phone]
-    
 
     const now = Date.now()
     if (record.lastSentAt && now - record.lastSentAt < 60 * 1000) {
@@ -297,90 +410,315 @@ app.post('/resend_otp', async (req, res) => {
 })
 
 // --------------------
+// Admin Management Routes
+// --------------------
+
+// Create new admin user (super admin only)
+app.post('/admin/create', authenticateAdmin, async (req, res) => {
+  try {
+    const { first_name, last_name, email, password, role = 'admin' } = req.body
+
+    // Check if requesting user has super admin privileges
+    const { data: requestingAdmin } = await supabase
+      .from('admin_users')
+      .select('role')
+      .eq('id', req.user.user_id)
+      .single()
+
+    if (requestingAdmin?.role !== 'super_admin') {
+      return res.status(403).json({
+        error: 'Only super administrators can create new admin users',
+      })
+    }
+
+    // Validate input
+    if (!first_name || !last_name || !email || !password) {
+      return res.status(400).json({
+        error: 'All fields are required',
+      })
+    }
+
+    // Check if admin already exists
+    const { data: existingAdmin } = await supabase
+      .from('admin_users')
+      .select('id')
+      .eq('email', email)
+      .single()
+
+    if (existingAdmin) {
+      return res.status(400).json({
+        error: 'Admin user with this email already exists',
+      })
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 12)
+
+    // Create admin user
+    const { data: newAdmin, error } = await supabase
+      .from('admin_users')
+      .insert([
+        {
+          first_name,
+          last_name,
+          email,
+          password_hash: hashedPassword,
+          role,
+          is_active: true,
+          created_by: req.user.user_id,
+        },
+      ])
+      .select('id, first_name, last_name, email, role, is_active, created_at')
+      .single()
+
+    if (error) {
+      console.error('Create admin error:', error)
+      return res.status(500).json({ error: 'Failed to create admin user' })
+    }
+
+    res.status(201).json({
+      message: 'Admin user created successfully',
+      admin: newAdmin,
+    })
+  } catch (err) {
+    console.error('Create admin error:', err)
+    res.status(500).json({ error: 'Something went wrong' })
+  }
+})
+
+// Get all admin users (admin only)
+app.get('/admin/users', authenticateAdmin, async (req, res) => {
+  try {
+    const { data: admins, error } = await supabase
+      .from('admin_users')
+      .select(
+        'id, first_name, last_name, email, role, is_active, created_at, last_login'
+      )
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('Fetch admins error:', error)
+      return res.status(500).json({ error: 'Failed to fetch admin users' })
+    }
+
+    res.json({ admins })
+  } catch (err) {
+    console.error('Get admin users error:', err)
+    res.status(500).json({ error: 'Something went wrong' })
+  }
+})
+
+// Update admin user status (super admin only)
+app.put('/admin/users/:id/status', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+    const { is_active } = req.body
+
+    // Check if requesting user has super admin privileges
+    const { data: requestingAdmin } = await supabase
+      .from('admin_users')
+      .select('role')
+      .eq('id', req.user.user_id)
+      .single()
+
+    if (requestingAdmin?.role !== 'super_admin') {
+      return res.status(403).json({
+        error: 'Only super administrators can modify admin user status',
+      })
+    }
+
+    // Don't allow deactivating yourself
+    if (id === req.user.user_id && !is_active) {
+      return res.status(400).json({
+        error: 'You cannot deactivate your own account',
+      })
+    }
+
+    const { error } = await supabase
+      .from('admin_users')
+      .update({ is_active })
+      .eq('id', id)
+
+    if (error) {
+      console.error('Update admin status error:', error)
+      return res.status(500).json({ error: 'Failed to update admin status' })
+    }
+
+    res.json({
+      message: `Admin user ${
+        is_active ? 'activated' : 'deactivated'
+      } successfully`,
+    })
+  } catch (err) {
+    console.error('Update admin status error:', err)
+    res.status(500).json({ error: 'Something went wrong' })
+  }
+})
+
+// Change admin password
+app.put('/admin/change-password', authenticateAdmin, async (req, res) => {
+  try {
+    const { current_password, new_password } = req.body
+
+    if (!current_password || !new_password) {
+      return res.status(400).json({
+        error: 'Current password and new password are required',
+      })
+    }
+
+    // Get current admin data
+    const { data: admin, error } = await supabase
+      .from('admin_users')
+      .select('password_hash')
+      .eq('id', req.user.user_id)
+      .single()
+
+    if (error || !admin) {
+      return res.status(404).json({ error: 'Admin user not found' })
+    }
+
+    // Verify current password
+    const isValidPassword = await bcrypt.compare(
+      current_password,
+      admin.password_hash
+    )
+    if (!isValidPassword) {
+      return res.status(401).json({ error: 'Current password is incorrect' })
+    }
+
+    // Hash new password
+    const hashedNewPassword = await bcrypt.hash(new_password, 12)
+
+    // Update password
+    const { error: updateError } = await supabase
+      .from('admin_users')
+      .update({ password_hash: hashedNewPassword })
+      .eq('id', req.user.user_id)
+
+    if (updateError) {
+      console.error('Password update error:', updateError)
+      return res.status(500).json({ error: 'Failed to update password' })
+    }
+
+    res.json({ message: 'Password updated successfully' })
+  } catch (err) {
+    console.error('Change password error:', err)
+    res.status(500).json({ error: 'Something went wrong' })
+  }
+})
+
+app.put('/user/change-password', authenticateToken, async (req, res) => {
+  try {
+    const { current_password, new_password } = req.body
+    const { data: user } = await supabase
+      .from('users')
+      .select('password_hash')
+      .eq('id', req.user.user_id)
+      .single()
+
+    if (!user) return res.status(404).json({ error: 'User not found' })
+    const isValid = await bcrypt.compare(current_password, user.password_hash)
+    if (!isValid)
+      return res.status(401).json({ error: 'Incorrect current password' })
+
+    const hashedNewPassword = await bcrypt.hash(new_password, 12)
+    await supabase
+      .from('users')
+      .update({ password_hash: hashedNewPassword })
+      .eq('id', req.user.user_id)
+
+    res.json({ message: 'Password updated successfully' })
+  } catch (err) {
+    console.error('Change password error:', err)
+    res.status(500).json({ error: 'Something went wrong' })
+  }
+})
+
+// --------------------
 // Profile routes
 // --------------------
 app.get('/profile/me', authenticateToken, async (req, res) => {
   try {
-    const { user_id } = req.user;
+    const { user_id } = req.user
 
     const { data, error } = await supabase
       .from('users')
       .select('*')
       .eq('id', user_id)
-      .single();
+      .single()
 
     if (error || !data) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: 'User not found' })
     }
 
     // Decrypt medical conditions before sending to frontend
-    const decryptedMedical = decrypt(data.medical_conditions);
+    const decryptedMedical = decrypt(data.medical_conditions)
 
     res.json({
       ...data,
       medical_conditions: decryptedMedical,
-    });
+    })
   } catch (err) {
-    console.error('Profile fetch error:', err);
-    res.status(500).json({ error: 'Failed to fetch profile' });
+    console.error('Profile fetch error:', err)
+    res.status(500).json({ error: 'Failed to fetch profile' })
   }
-});
+})
 
 app.put('/profile/me', authenticateToken, async (req, res) => {
   try {
-    const { user_id } = req.user;
-    const updatedData = { ...req.body };
+    const { user_id } = req.user
+    const updatedData = { ...req.body }
 
     // Encrypt medical_conditions before saving
     if (updatedData.medical_conditions) {
-      updatedData.medical_conditions = encrypt(updatedData.medical_conditions);
+      updatedData.medical_conditions = encrypt(updatedData.medical_conditions)
     }
 
     const { error } = await supabase
       .from('users')
       .update(updatedData)
-      .eq('id', user_id);
+      .eq('id', user_id)
 
     if (error) {
-      return res.status(400).json({ error: 'Failed to update profile' });
+      return res.status(400).json({ error: 'Failed to update profile' })
     }
 
-    res.json({ message: 'Profile updated successfully' });
+    res.json({ message: 'Profile updated successfully' })
   } catch (err) {
-    console.error('Profile update error:', err);
-    res.status(500).json({ error: 'Failed to update profile' });
+    console.error('Profile update error:', err)
+    res.status(500).json({ error: 'Failed to update profile' })
   }
-});
+})
 
 // Increment emergency calls for current user
 
-
 // Update user location
-app.post("/update_location", authenticateToken, async (req, res) => {
+app.post('/update_location', authenticateToken, async (req, res) => {
   try {
-    const { user_id } = req.user; // comes from JWT payload
-    const { latitude, longitude } = req.body;
+    const { user_id } = req.user // comes from JWT payload
+    const { latitude, longitude } = req.body
 
     if (!latitude || !longitude) {
-      return res.status(400).json({ error: "Latitude and longitude are required" });
+      return res
+        .status(400)
+        .json({ error: 'Latitude and longitude are required' })
     }
 
     const { data, error } = await supabase
-      .from("users")
+      .from('users')
       .update({ latitude, longitude })
-      .eq("id", user_id)
-      .select("id, latitude, longitude")
-      .single();
+      .eq('id', user_id)
+      .select('id, latitude, longitude')
+      .single()
 
-    if (error) throw error;
+    if (error) throw error
 
-    res.json({ success: true, user: data });
+    res.json({ success: true, user: data })
   } catch (err) {
-    console.error("Update location error:", err);
-    res.status(500).json({ error: "Failed to update location" });
+    console.error('Update location error:', err)
+    res.status(500).json({ error: 'Failed to update location' })
   }
-});
-
+})
 
 // Add these routes to your existing backend/index.js file
 
@@ -391,31 +729,33 @@ app.post("/update_location", authenticateToken, async (req, res) => {
 // GET /locations - Fetch all saved locations for the authenticated user
 app.get('/locations', authenticateToken, async (req, res) => {
   try {
-    const { user_id } = req.user;
+    const { user_id } = req.user
 
     const { data: user, error } = await supabase
       .from('users')
       .select('other_addresses, street_address, city, state, zip_code')
       .eq('id', user_id)
-      .single();
+      .single()
 
     if (error) {
-      console.error('Supabase error:', error);
-      return res.status(500).json({ error: 'Failed to fetch locations' });
+      console.error('Supabase error:', error)
+      return res.status(500).json({ error: 'Failed to fetch locations' })
     }
 
-    const locations = [];
-    
+    const locations = []
+
     // Add home address as first location if it exists
     if (user.street_address && user.city) {
       locations.push({
         id: 'home',
         name: 'Home',
-        address: `${user.street_address}, ${user.city}${user.state ? ', ' + user.state : ''}${user.zip_code ? ' ' + user.zip_code : ''}`,
+        address: `${user.street_address}, ${user.city}${
+          user.state ? ', ' + user.state : ''
+        }${user.zip_code ? ' ' + user.zip_code : ''}`,
         latitude: null, // You might want to geocode this later
         longitude: null,
-        is_primary: true
-      });
+        is_primary: true,
+      })
     }
 
     // Add other addresses
@@ -423,15 +763,15 @@ app.get('/locations', authenticateToken, async (req, res) => {
       user.other_addresses.forEach((address, index) => {
         if (address && address !== 'NULL' && address.trim() !== '') {
           try {
-            const parsedAddress = JSON.parse(address);
+            const parsedAddress = JSON.parse(address)
             locations.push({
               id: `other_${index}`,
               name: parsedAddress.name || `Location ${index + 1}`,
               address: parsedAddress.address,
               latitude: parsedAddress.latitude || null,
               longitude: parsedAddress.longitude || null,
-              is_primary: false
-            });
+              is_primary: false,
+            })
           } catch (e) {
             // If it's not JSON, treat as simple address string
             locations.push({
@@ -440,39 +780,44 @@ app.get('/locations', authenticateToken, async (req, res) => {
               address: address,
               latitude: null,
               longitude: null,
-              is_primary: false
-            });
+              is_primary: false,
+            })
           }
         }
-      });
+      })
     }
 
-    res.json({ locations });
+    res.json({ locations })
   } catch (err) {
-    console.error('Server error:', err);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Server error:', err)
+    res.status(500).json({ error: 'Internal server error' })
   }
-});
+})
 
 // POST /locations - Add a new saved location
 app.post('/locations', authenticateToken, async (req, res) => {
   try {
-    const { user_id } = req.user;
-    const { name, address, latitude, longitude } = req.body;
+    const { user_id } = req.user
+    const { name, address, latitude, longitude } = req.body
 
     // Validation
     if (!name || !address) {
-      return res.status(400).json({ 
-        error: 'Name and address are required' 
-      });
+      return res.status(400).json({
+        error: 'Name and address are required',
+      })
     }
 
     // Validate coordinates if provided
     if (latitude !== undefined && longitude !== undefined) {
-      if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
-        return res.status(400).json({ 
-          error: 'Invalid coordinates' 
-        });
+      if (
+        latitude < -90 ||
+        latitude > 90 ||
+        longitude < -180 ||
+        longitude > 180
+      ) {
+        return res.status(400).json({
+          error: 'Invalid coordinates',
+        })
       }
     }
 
@@ -481,11 +826,11 @@ app.post('/locations', authenticateToken, async (req, res) => {
       .from('users')
       .select('other_addresses')
       .eq('id', user_id)
-      .single();
+      .single()
 
     if (fetchError) {
-      console.error('Fetch error:', fetchError);
-      return res.status(500).json({ error: 'Failed to fetch user data' });
+      console.error('Fetch error:', fetchError)
+      return res.status(500).json({ error: 'Failed to fetch user data' })
     }
 
     // Prepare new location object
@@ -494,62 +839,64 @@ app.post('/locations', authenticateToken, async (req, res) => {
       address: address.trim(),
       latitude: latitude ? parseFloat(latitude) : null,
       longitude: longitude ? parseFloat(longitude) : null,
-      created_at: new Date().toISOString()
-    };
+      created_at: new Date().toISOString(),
+    }
 
     // Get existing addresses or initialize empty array
-    let otherAddresses = user.other_addresses || [];
-    
+    let otherAddresses = user.other_addresses || []
+
     // Filter out NULL values
-    otherAddresses = otherAddresses.filter(addr => addr && addr !== 'NULL' && addr.trim() !== '');
+    otherAddresses = otherAddresses.filter(
+      (addr) => addr && addr !== 'NULL' && addr.trim() !== ''
+    )
 
     // Add new location as JSON string
-    otherAddresses.push(JSON.stringify(newLocation));
+    otherAddresses.push(JSON.stringify(newLocation))
 
     // Update the database
     const { error: updateError } = await supabase
       .from('users')
       .update({ other_addresses: otherAddresses })
-      .eq('id', user_id);
+      .eq('id', user_id)
 
     if (updateError) {
-      console.error('Update error:', updateError);
-      return res.status(500).json({ error: 'Failed to add location' });
+      console.error('Update error:', updateError)
+      return res.status(500).json({ error: 'Failed to add location' })
     }
 
-    res.status(201).json({ 
+    res.status(201).json({
       message: 'Location added successfully',
       location: {
         id: `other_${otherAddresses.length - 1}`,
         ...newLocation,
-        is_primary: false
-      }
-    });
+        is_primary: false,
+      },
+    })
   } catch (err) {
-    console.error('Server error:', err);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Server error:', err)
+    res.status(500).json({ error: 'Internal server error' })
   }
-});
+})
 
 // DELETE /locations/:id - Delete a saved location
 app.delete('/locations/:id', authenticateToken, async (req, res) => {
   try {
-    const { user_id } = req.user;
-    const { id } = req.params;
+    const { user_id } = req.user
+    const { id } = req.params
 
     // Can't delete home address
     if (id === 'home') {
-      return res.status(400).json({ error: 'Cannot delete home address' });
+      return res.status(400).json({ error: 'Cannot delete home address' })
     }
 
     // Extract index from id (format: "other_0", "other_1", etc.)
     if (!id.startsWith('other_')) {
-      return res.status(400).json({ error: 'Invalid location ID' });
+      return res.status(400).json({ error: 'Invalid location ID' })
     }
 
-    const index = parseInt(id.split('_')[1]);
+    const index = parseInt(id.split('_')[1])
     if (isNaN(index)) {
-      return res.status(400).json({ error: 'Invalid location ID' });
+      return res.status(400).json({ error: 'Invalid location ID' })
     }
 
     // Get current other_addresses
@@ -557,80 +904,89 @@ app.delete('/locations/:id', authenticateToken, async (req, res) => {
       .from('users')
       .select('other_addresses')
       .eq('id', user_id)
-      .single();
+      .single()
 
     if (fetchError) {
-      console.error('Fetch error:', fetchError);
-      return res.status(500).json({ error: 'Failed to fetch user data' });
+      console.error('Fetch error:', fetchError)
+      return res.status(500).json({ error: 'Failed to fetch user data' })
     }
 
-    let otherAddresses = user.other_addresses || [];
-    
+    let otherAddresses = user.other_addresses || []
+
     // Filter out NULL values
-    otherAddresses = otherAddresses.filter(addr => addr && addr !== 'NULL' && addr.trim() !== '');
+    otherAddresses = otherAddresses.filter(
+      (addr) => addr && addr !== 'NULL' && addr.trim() !== ''
+    )
 
     // Check if index is valid
     if (index < 0 || index >= otherAddresses.length) {
-      return res.status(404).json({ error: 'Location not found' });
+      return res.status(404).json({ error: 'Location not found' })
     }
 
     // Remove the location at the specified index
-    otherAddresses.splice(index, 1);
+    otherAddresses.splice(index, 1)
 
     // Update the database
     const { error: updateError } = await supabase
       .from('users')
       .update({ other_addresses: otherAddresses })
-      .eq('id', user_id);
+      .eq('id', user_id)
 
     if (updateError) {
-      console.error('Update error:', updateError);
-      return res.status(500).json({ error: 'Failed to delete location' });
+      console.error('Update error:', updateError)
+      return res.status(500).json({ error: 'Failed to delete location' })
     }
 
-    res.json({ message: 'Location deleted successfully' });
+    res.json({ message: 'Location deleted successfully' })
   } catch (err) {
-    console.error('Server error:', err);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Server error:', err)
+    res.status(500).json({ error: 'Internal server error' })
   }
-});
+})
 
 // PUT /locations/:id - Update a saved location
 app.put('/locations/:id', authenticateToken, async (req, res) => {
   try {
-    const { user_id } = req.user;
-    const { id } = req.params;
-    const { name, address, latitude, longitude } = req.body;
+    const { user_id } = req.user
+    const { id } = req.params
+    const { name, address, latitude, longitude } = req.body
 
     // Validation
     if (!name || !address) {
-      return res.status(400).json({ 
-        error: 'Name and address are required' 
-      });
+      return res.status(400).json({
+        error: 'Name and address are required',
+      })
     }
 
     // Validate coordinates if provided
     if (latitude !== undefined && longitude !== undefined) {
-      if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
-        return res.status(400).json({ 
-          error: 'Invalid coordinates' 
-        });
+      if (
+        latitude < -90 ||
+        latitude > 90 ||
+        longitude < -180 ||
+        longitude > 180
+      ) {
+        return res.status(400).json({
+          error: 'Invalid coordinates',
+        })
       }
     }
 
     // Can't update home address through this endpoint
     if (id === 'home') {
-      return res.status(400).json({ error: 'Use profile endpoint to update home address' });
+      return res
+        .status(400)
+        .json({ error: 'Use profile endpoint to update home address' })
     }
 
     // Extract index from id
     if (!id.startsWith('other_')) {
-      return res.status(400).json({ error: 'Invalid location ID' });
+      return res.status(400).json({ error: 'Invalid location ID' })
     }
 
-    const index = parseInt(id.split('_')[1]);
+    const index = parseInt(id.split('_')[1])
     if (isNaN(index)) {
-      return res.status(400).json({ error: 'Invalid location ID' });
+      return res.status(400).json({ error: 'Invalid location ID' })
     }
 
     // Get current other_addresses
@@ -638,21 +994,23 @@ app.put('/locations/:id', authenticateToken, async (req, res) => {
       .from('users')
       .select('other_addresses')
       .eq('id', user_id)
-      .single();
+      .single()
 
     if (fetchError) {
-      console.error('Fetch error:', fetchError);
-      return res.status(500).json({ error: 'Failed to fetch user data' });
+      console.error('Fetch error:', fetchError)
+      return res.status(500).json({ error: 'Failed to fetch user data' })
     }
 
-    let otherAddresses = user.other_addresses || [];
-    
+    let otherAddresses = user.other_addresses || []
+
     // Filter out NULL values
-    otherAddresses = otherAddresses.filter(addr => addr && addr !== 'NULL' && addr.trim() !== '');
+    otherAddresses = otherAddresses.filter(
+      (addr) => addr && addr !== 'NULL' && addr.trim() !== ''
+    )
 
     // Check if index is valid
     if (index < 0 || index >= otherAddresses.length) {
-      return res.status(404).json({ error: 'Location not found' });
+      return res.status(404).json({ error: 'Location not found' })
     }
 
     // Prepare updated location object
@@ -661,173 +1019,187 @@ app.put('/locations/:id', authenticateToken, async (req, res) => {
       address: address.trim(),
       latitude: latitude ? parseFloat(latitude) : null,
       longitude: longitude ? parseFloat(longitude) : null,
-      updated_at: new Date().toISOString()
-    };
+      updated_at: new Date().toISOString(),
+    }
 
     // Update the location at the specified index
-    otherAddresses[index] = JSON.stringify(updatedLocation);
+    otherAddresses[index] = JSON.stringify(updatedLocation)
 
     // Update the database
     const { error: updateError } = await supabase
       .from('users')
       .update({ other_addresses: otherAddresses })
-      .eq('id', user_id);
+      .eq('id', user_id)
 
     if (updateError) {
-      console.error('Update error:', updateError);
-      return res.status(500).json({ error: 'Failed to update location' });
+      console.error('Update error:', updateError)
+      return res.status(500).json({ error: 'Failed to update location' })
     }
 
-    res.json({ 
+    res.json({
       message: 'Location updated successfully',
       location: {
         id,
         ...updatedLocation,
-        is_primary: false
-      }
-    });
+        is_primary: false,
+      },
+    })
   } catch (err) {
-    console.error('Server error:', err);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Server error:', err)
+    res.status(500).json({ error: 'Internal server error' })
   }
-});
+})
 
 // POST /call
 // Replace the existing /emergency/call route in your backend index.js
 
-app.post("/emergency/call", authenticateToken, async (req, res) => {
+app.post('/emergency/call', authenticateToken, async (req, res) => {
   try {
-    const { user_id } = req.user;
-    const { contactId } = req.body; // Accept contactId from frontend
+    const { user_id } = req.user
+    const { contactId } = req.body // Accept contactId from frontend
 
     // Get user's profile from Supabase to get emergency contacts
     const { data: user, error } = await supabase
       .from('users')
-      .select('primary_emergency_phone, primary_emergency_contact, secondary_emergency_phone, secondary_emergency_contact, emergency_calls')
+      .select(
+        'primary_emergency_phone, primary_emergency_contact, secondary_emergency_phone, secondary_emergency_contact, emergency_calls'
+      )
       .eq('id', user_id)
-      .single();
+      .single()
 
     if (error || !user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: 'User not found' })
     }
 
     // Select contact based on contactId
-    let contactPhone, contactName;
-    
+    let contactPhone, contactName
+
     if (contactId === 2 || contactId === '2') {
       // Secondary contact
-      contactPhone = user.secondary_emergency_phone;
-      contactName = user.secondary_emergency_contact;
-      
+      contactPhone = user.secondary_emergency_phone
+      contactName = user.secondary_emergency_contact
+
       if (!contactPhone || !contactName) {
-        return res.status(400).json({ error: 'No secondary emergency contact found' });
+        return res
+          .status(400)
+          .json({ error: 'No secondary emergency contact found' })
       }
     } else {
       // Primary contact (default)
-      contactPhone = user.primary_emergency_phone;
-      contactName = user.primary_emergency_contact;
-      
+      contactPhone = user.primary_emergency_phone
+      contactName = user.primary_emergency_contact
+
       if (!contactPhone || !contactName) {
-        return res.status(400).json({ error: 'No primary emergency contact found' });
+        return res
+          .status(400)
+          .json({ error: 'No primary emergency contact found' })
       }
     }
 
     // Format phone number
-    let formattedPhone = contactPhone.replace(/\D/g, '');
+    let formattedPhone = contactPhone.replace(/\D/g, '')
     if (formattedPhone.startsWith('91') && formattedPhone.length === 12) {
-      formattedPhone = '+' + formattedPhone;
+      formattedPhone = '+' + formattedPhone
     } else if (formattedPhone.length === 10) {
-      formattedPhone = '+91' + formattedPhone;
+      formattedPhone = '+91' + formattedPhone
     } else {
-      return res.status(400).json({ error: 'Invalid emergency contact phone format' });
+      return res
+        .status(400)
+        .json({ error: 'Invalid emergency contact phone format' })
     }
 
     // Call the selected emergency contact
     const call = await client.calls.create({
       from: process.env.TWILIO_PHONE,
       to: formattedPhone,
-      twiml: `<Response><Say>This is an emergency call triggered by ${contactName}. Please respond immediately.</Say></Response>`
-    });
+      twiml: `<Response><Say>This is an emergency call triggered by ${contactName}. Please respond immediately.</Say></Response>`,
+    })
 
     // Increment emergency calls count
-    const newCount = (user.emergency_calls || 0) + 1;
+    const newCount = (user.emergency_calls || 0) + 1
     await supabase
       .from('users')
       .update({ emergency_calls: newCount })
-      .eq('id', user_id);
+      .eq('id', user_id)
 
-    console.log(`Emergency call made to ${contactName} (${contactPhone}): ${call.sid}`);
+    console.log(
+      `Emergency call made to ${contactName} (${contactPhone}): ${call.sid}`
+    )
 
-    res.json({ 
-      success: true, 
-      sid: call.sid, 
+    res.json({
+      success: true,
+      sid: call.sid,
       emergency_calls: newCount,
       contact: contactName,
-      contactType: contactId === 2 || contactId === '2' ? 'Secondary' : 'Primary'
-    });
-
+      contactType:
+        contactId === 2 || contactId === '2' ? 'Secondary' : 'Primary',
+    })
   } catch (err) {
-    console.error("Error making emergency call:", err);
-    res.status(500).json({ success: false, error: err.message });
+    console.error('Error making emergency call:', err)
+    res.status(500).json({ success: false, error: err.message })
   }
-});
+})
 
 // Add these routes to your index.js backend file
 
 // Route to search for route to a pincode
 app.post('/route/search', authenticateToken, async (req, res) => {
   try {
-    const { fromLat, fromLng, toPincode } = req.body;
+    const { fromLat, fromLng, toPincode } = req.body
 
     if (!fromLat || !fromLng || !toPincode) {
-      return res.status(400).json({ error: 'Missing required parameters' });
+      return res.status(400).json({ error: 'Missing required parameters' })
     }
 
     // Validate pincode format
     if (!/^\d{6}$/.test(toPincode)) {
-      return res.status(400).json({ error: 'Invalid pincode format' });
+      return res.status(400).json({ error: 'Invalid pincode format' })
     }
 
     // Geocode the pincode to get destination coordinates
     const geocodeResponse = await fetch(
       `https://nominatim.openstreetmap.org/search?format=json&q=${toPincode}&countrycodes=IN&limit=1`
-    );
-    const geocodeData = await geocodeResponse.json();
+    )
+    const geocodeData = await geocodeResponse.json()
 
     if (!geocodeData || geocodeData.length === 0) {
-      return res.status(404).json({ error: 'Pincode not found' });
+      return res.status(404).json({ error: 'Pincode not found' })
     }
 
     const destination = {
       lat: parseFloat(geocodeData[0].lat),
       lng: parseFloat(geocodeData[0].lon),
-      address: geocodeData[0].display_name
-    };
+      address: geocodeData[0].display_name,
+    }
 
     // You can also calculate distance here if needed
-    const distance = calculateDistance(fromLat, fromLng, destination.lat, destination.lng);
+    const distance = calculateDistance(
+      fromLat,
+      fromLng,
+      destination.lat,
+      destination.lng
+    )
 
     res.json({
       success: true,
       origin: { lat: fromLat, lng: fromLng },
       destination: destination,
       distance: distance,
-      pincode: toPincode
-    });
-
+      pincode: toPincode,
+    })
   } catch (error) {
-    console.error('Route search error:', error);
-    res.status(500).json({ error: 'Failed to search route' });
+    console.error('Route search error:', error)
+    res.status(500).json({ error: 'Failed to search route' })
   }
-});
+})
 
 // Route to send location via SMS using Twilio
 app.post('/location/send-sms', authenticateToken, async (req, res) => {
   try {
-    const { contactId, latitude, longitude } = req.body;
+    const { contactId, latitude, longitude } = req.body
 
     if (!contactId || !latitude || !longitude) {
-      return res.status(400).json({ error: 'Missing required parameters' });
+      return res.status(400).json({ error: 'Missing required parameters' })
     }
 
     // Get user's profile from Supabase
@@ -835,79 +1207,81 @@ app.post('/location/send-sms', authenticateToken, async (req, res) => {
       .from('users')
       .select('*')
       .eq('id', req.user.user_id)
-      .single();
+      .single()
 
     if (error || !user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: 'User not found' })
     }
 
-    let contactName, contactPhone;
+    let contactName, contactPhone
 
     // Determine which contact to send to
     if (contactId === '1' || contactId === 1) {
-      contactName = user.primary_emergency_contact;
-      contactPhone = user.primary_emergency_phone;
+      contactName = user.primary_emergency_contact
+      contactPhone = user.primary_emergency_phone
     } else if (contactId === '2' || contactId === 2) {
-      contactName = user.secondary_emergency_contact;
-      contactPhone = user.secondary_emergency_phone;
+      contactName = user.secondary_emergency_contact
+      contactPhone = user.secondary_emergency_phone
     } else {
-      return res.status(400).json({ error: 'Invalid contact ID' });
+      return res.status(400).json({ error: 'Invalid contact ID' })
     }
 
     if (!contactName || !contactPhone) {
-      return res.status(400).json({ error: 'Contact not found or incomplete' });
+      return res.status(400).json({ error: 'Contact not found or incomplete' })
     }
 
     // Format phone number for Twilio (ensure it has country code)
-    let formattedPhone = contactPhone.replace(/\D/g, ''); // Remove non-digits
+    let formattedPhone = contactPhone.replace(/\D/g, '') // Remove non-digits
     if (formattedPhone.startsWith('91') && formattedPhone.length === 12) {
-      formattedPhone = '+' + formattedPhone;
+      formattedPhone = '+' + formattedPhone
     } else if (formattedPhone.length === 10) {
-      formattedPhone = '+91' + formattedPhone;
+      formattedPhone = '+91' + formattedPhone
     } else {
-      return res.status(400).json({ error: 'Invalid phone number format' });
+      return res.status(400).json({ error: 'Invalid phone number format' })
     }
 
     // Reverse geocode to get pincode/area info
-    let locationInfo = `${latitude}, ${longitude}`;
+    let locationInfo = `${latitude}, ${longitude}`
     try {
       const geocodeResponse = await fetch(
         `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=10`
-      );
-      const geocodeData = await geocodeResponse.json();
-      
+      )
+      const geocodeData = await geocodeResponse.json()
+
       if (geocodeData && geocodeData.address) {
-        const address = geocodeData.address;
-        const pincode = address.postcode;
-        const city = address.city || address.town || address.village;
-        const state = address.state;
-        
+        const address = geocodeData.address
+        const pincode = address.postcode
+        const city = address.city || address.town || address.village
+        const state = address.state
+
         if (pincode) {
-          locationInfo = `${city || 'Unknown Area'}, ${state || 'India'} - ${pincode}`;
+          locationInfo = `${city || 'Unknown Area'}, ${
+            state || 'India'
+          } - ${pincode}`
         } else if (city) {
-          locationInfo = `${city}, ${state || 'India'}`;
+          locationInfo = `${city}, ${state || 'India'}`
         }
       }
     } catch (geocodeError) {
-      console.log('Geocoding failed, using coordinates:', geocodeError.message);
+      console.log('Geocoding failed, using coordinates:', geocodeError.message)
       // Will use coordinates as fallback
     }
 
     // Create simple location message without URL
-    const locationMessage = `EMERGENCY ALERT from ${user.first_name} ${user.last_name}. Location: ${locationInfo}. Coordinates: ${latitude}, ${longitude}. Please respond immediately.`;
+    const locationMessage = `EMERGENCY ALERT from ${user.first_name} ${user.last_name}. Location: ${locationInfo}. Coordinates: ${latitude}, ${longitude}. Please respond immediately.`
 
-    console.log('Sending SMS to formatted phone:', formattedPhone);
-    console.log('Original phone from database:', contactPhone);
-    console.log('Message content:', locationMessage);
+    console.log('Sending SMS to formatted phone:', formattedPhone)
+    console.log('Original phone from database:', contactPhone)
+    console.log('Message content:', locationMessage)
 
     // Send SMS using Twilio
     const message = await client.messages.create({
       body: locationMessage,
       from: process.env.TWILIO_PHONE,
-      to: formattedPhone
-    });
+      to: formattedPhone,
+    })
 
-    console.log(`Location SMS sent to ${contactName}: ${message.sid}`);
+    console.log(`Location SMS sent to ${contactName}: ${message.sid}`)
 
     res.json({
       success: true,
@@ -915,164 +1289,200 @@ app.post('/location/send-sms', authenticateToken, async (req, res) => {
       phone: contactPhone,
       messageSid: message.sid,
       locationInfo: locationInfo,
-      message: 'Location sent successfully via SMS'
-    });
-
+      message: 'Location sent successfully via SMS',
+    })
   } catch (error) {
-    console.error('SMS sending error:', error);
-    res.status(500).json({ error: 'Failed to send location SMS' });
+    console.error('SMS sending error:', error)
+    res.status(500).json({ error: 'Failed to send location SMS' })
   }
-});
+})
 
 // Helper function to calculate distance between two coordinates (Haversine formula)
 function calculateDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371; // Earth's radius in kilometers
-  const dLat = deg2rad(lat2 - lat1);
-  const dLon = deg2rad(lon2 - lon1);
-  const a = 
-    Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * 
-    Math.sin(dLon/2) * Math.sin(dLon/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  const distance = R * c; // Distance in kilometers
-  return Math.round(distance * 100) / 100; // Round to 2 decimal places
+  const R = 6371 // Earth's radius in kilometers
+  const dLat = deg2rad(lat2 - lat1)
+  const dLon = deg2rad(lon2 - lon1)
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(deg2rad(lat1)) *
+      Math.cos(deg2rad(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  const distance = R * c // Distance in kilometers
+  return Math.round(distance * 100) / 100 // Round to 2 decimal places
 }
 
 function deg2rad(deg) {
-  return deg * (Math.PI/180);
+  return deg * (Math.PI / 180)
 }
 
 // Additional route to get route details (optional - for more detailed routing)
 app.post('/route/details', authenticateToken, async (req, res) => {
   try {
-    const { fromLat, fromLng, toLat, toLng } = req.body;
+    const { fromLat, fromLng, toLat, toLng } = req.body
 
     if (!fromLat || !fromLng || !toLat || !toLng) {
-      return res.status(400).json({ error: 'Missing coordinates' });
+      return res.status(400).json({ error: 'Missing coordinates' })
     }
 
     // You can integrate with routing services like OpenRouteService or MapBox here
     // For now, we'll return basic details
-    const distance = calculateDistance(fromLat, fromLng, toLat, toLng);
-    const estimatedTime = Math.round((distance / 50) * 60); // Rough estimate: 50 km/h average speed
+    const distance = calculateDistance(fromLat, fromLng, toLat, toLng)
+    const estimatedTime = Math.round((distance / 50) * 60) // Rough estimate: 50 km/h average speed
 
     res.json({
       success: true,
       distance: distance,
       estimatedTime: estimatedTime,
-      googleMapsUrl: `https://www.google.com/maps/dir/${fromLat},${fromLng}/${toLat},${toLng}`
-    });
-
+      googleMapsUrl: `https://www.google.com/maps/dir/${fromLat},${fromLng}/${toLat},${toLng}`,
+    })
   } catch (error) {
-    console.error('Route details error:', error);
-    res.status(500).json({ error: 'Failed to get route details' });
+    console.error('Route details error:', error)
+    res.status(500).json({ error: 'Failed to get route details' })
   }
-});
+})
 
 // Route to send bulk location alerts to all emergency contacts
-app.post('/location/send-emergency-alert', authenticateToken, async (req, res) => {
-  try {
-    const { latitude, longitude, emergencyType = 'GENERAL' } = req.body;
+app.post(
+  '/location/send-emergency-alert',
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const { latitude, longitude, emergencyType = 'GENERAL' } = req.body
 
-    if (!latitude || !longitude) {
-      return res.status(400).json({ error: 'Location coordinates required' });
-    }
+      if (!latitude || !longitude) {
+        return res.status(400).json({ error: 'Location coordinates required' })
+      }
 
-    // Get user's profile from Supabase
-    const { data: user, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', req.user.user_id)
-      .single();
+      // Get user's profile from Supabase
+      const { data: user, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', req.user.user_id)
+        .single()
 
-    if (error || !user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
+      if (error || !user) {
+        return res.status(404).json({ error: 'User not found' })
+      }
 
-    const contacts = [];
-    const results = [];
+      const contacts = []
+      const results = []
 
-    // Add primary contact
-    if (user.primary_emergency_contact && user.primary_emergency_phone) {
-      contacts.push({
-        name: user.primary_emergency_contact,
-        phone: user.primary_emergency_phone,
-        relation: user.primary_emergency_relation || 'Primary'
-      });
-    }
+      // Add primary contact
+      if (user.primary_emergency_contact && user.primary_emergency_phone) {
+        contacts.push({
+          name: user.primary_emergency_contact,
+          phone: user.primary_emergency_phone,
+          relation: user.primary_emergency_relation || 'Primary',
+        })
+      }
 
-    // Add secondary contact
-    if (user.secondary_emergency_contact && user.secondary_emergency_phone) {
-      contacts.push({
-        name: user.secondary_emergency_contact,
-        phone: user.secondary_emergency_phone,
-        relation: user.secondary_emergency_relation || 'Secondary'
-      });
-    }
+      // Add secondary contact
+      if (user.secondary_emergency_contact && user.secondary_emergency_phone) {
+        contacts.push({
+          name: user.secondary_emergency_contact,
+          phone: user.secondary_emergency_phone,
+          relation: user.secondary_emergency_relation || 'Secondary',
+        })
+      }
 
-    if (contacts.length === 0) {
-      return res.status(400).json({ error: 'No emergency contacts configured' });
-    }
+      if (contacts.length === 0) {
+        return res
+          .status(400)
+          .json({ error: 'No emergency contacts configured' })
+      }
 
-    // Send SMS to all contacts
-    for (const contact of contacts) {
-      try {
-        let formattedPhone = contact.phone.replace(/\D/g, '');
-        if (formattedPhone.startsWith('91') && formattedPhone.length === 12) {
-          formattedPhone = '+' + formattedPhone;
-        } else if (formattedPhone.length === 10) {
-          formattedPhone = '+91' + formattedPhone;
-        } else {
+      // Send SMS to all contacts
+      for (const contact of contacts) {
+        try {
+          let formattedPhone = contact.phone.replace(/\D/g, '')
+          if (formattedPhone.startsWith('91') && formattedPhone.length === 12) {
+            formattedPhone = '+' + formattedPhone
+          } else if (formattedPhone.length === 10) {
+            formattedPhone = '+91' + formattedPhone
+          } else {
+            results.push({
+              contact: contact.name,
+              status: 'failed',
+              error: 'Invalid phone format',
+            })
+            continue
+          }
+
+          const googleMapsLink = `https://maps.google.com/?q=${latitude},${longitude}`
+          const alertMessage = `🚨 ${emergencyType} EMERGENCY ALERT 🚨\n\nFrom: ${
+            user.first_name
+          } ${
+            user.last_name
+          }\nTime: ${new Date().toLocaleString()}\nLocation: ${latitude}, ${longitude}\n\nView location: ${googleMapsLink}\n\nPlease respond immediately. This is an automated emergency alert.`
+
+          const message = await client.messages.create({
+            body: alertMessage,
+            from: process.env.TWILIO_PHONE,
+            to: formattedPhone,
+          })
+
+          results.push({
+            contact: contact.name,
+            phone: contact.phone,
+            status: 'sent',
+            messageSid: message.sid,
+          })
+        } catch (error) {
+          console.error(`Failed to send SMS to ${contact.name}:`, error)
           results.push({
             contact: contact.name,
             status: 'failed',
-            error: 'Invalid phone format'
-          });
-          continue;
+            error: error.message,
+          })
         }
-
-        const googleMapsLink = `https://maps.google.com/?q=${latitude},${longitude}`;
-        const alertMessage = `🚨 ${emergencyType} EMERGENCY ALERT 🚨\n\nFrom: ${user.first_name} ${user.last_name}\nTime: ${new Date().toLocaleString()}\nLocation: ${latitude}, ${longitude}\n\nView location: ${googleMapsLink}\n\nPlease respond immediately. This is an automated emergency alert.`;
-
-        const message = await client.messages.create({
-          body: alertMessage,
-          from: process.env.TWILIO_PHONE,
-          to: formattedPhone
-        });
-
-        results.push({
-          contact: contact.name,
-          phone: contact.phone,
-          status: 'sent',
-          messageSid: message.sid
-        });
-
-      } catch (error) {
-        console.error(`Failed to send SMS to ${contact.name}:`, error);
-        results.push({
-          contact: contact.name,
-          status: 'failed',
-          error: error.message
-        });
       }
+
+      res.json({
+        success: true,
+        alertType: emergencyType,
+        contactsNotified: results.filter((r) => r.status === 'sent').length,
+        totalContacts: contacts.length,
+        results: results,
+      })
+    } catch (error) {
+      console.error('Emergency alert error:', error)
+      res.status(500).json({ error: 'Failed to send emergency alerts' })
+    }
+  }
+)
+// 🆕 New Route to Get Nearby Emergency Services
+app.post('/get-nearby-services', async (req, res) => {
+  try {
+    const { lat, lng } = req.body // front-end sends current location
+
+    const types = ['police', 'hospital', 'fire_station']
+    const results = {}
+
+    for (const type of types) {
+      const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=5000&type=${type}&key=${process.env.GOOGLE_PLACES_API_KEY}`
+      const response = await fetch(url)
+      const data = await response.json()
+
+      results[type] = data.results.map((place) => ({
+        name: place.name,
+        address: place.vicinity,
+        location: place.geometry.location,
+        rating: place.rating || 'N/A',
+        phone: place.formatted_phone_number || 'Not Available',
+      }))
     }
 
     res.json({
       success: true,
-      alertType: emergencyType,
-      contactsNotified: results.filter(r => r.status === 'sent').length,
-      totalContacts: contacts.length,
-      results: results
-    });
-
-  } catch (error) {
-    console.error('Emergency alert error:', error);
-    res.status(500).json({ error: 'Failed to send emergency alerts' });
+      nearby: results,
+    })
+  } catch (err) {
+    console.error('Error fetching services:', err.message)
+    res.status(500).json({ success: false, error: 'Failed to fetch services' })
   }
-});
-
-
-
+})
 
 app.listen(PORT, () =>
   console.log(`🚀 Server running on http://localhost:${PORT}`)

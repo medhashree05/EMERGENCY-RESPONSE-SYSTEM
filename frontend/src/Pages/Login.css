@@ -3,7 +3,8 @@
   min-height: 100vh;
   background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 50%, #0f172a 100%);
   color: white;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    sans-serif;
 }
 
 .login-container {
@@ -129,7 +130,6 @@
 
 .form-group label {
   font-weight: 500;
-  color: #e2e8f0;
   font-size: 0.875rem;
 }
 
@@ -141,10 +141,6 @@
   color: white;
   font-size: 1rem;
   transition: all 0.3s ease;
-}
-
-.form-group input::placeholder {
-  color: #94a3b8;
 }
 
 .form-group input:focus {
@@ -165,6 +161,80 @@
   margin-top: 0.25rem;
 }
 
+/* User Type Selector */
+.user-type-selector {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  flex: 1;
+  padding: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+.radio-label:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.radio-label input[type='radio'] {
+  display: none;
+}
+
+.radio-custom {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.05);
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+.radio-label input[type='radio']:checked + .radio-custom {
+  background: #3b82f6;
+  border-color: #3b82f6;
+}
+
+.radio-label input[type='radio']:checked + .radio-custom::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: white;
+}
+
+.radio-text {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.user-icon,
+.admin-icon {
+  font-size: 1rem;
+}
+
+.radio-label input[type='radio']:checked ~ .radio-text {
+  color: #93c5fd;
+}
+
 /* Form Options */
 .form-options {
   display: flex;
@@ -182,7 +252,7 @@
   font-size: 0.875rem;
 }
 
-.checkbox-label input[type="checkbox"] {
+.checkbox-label input[type='checkbox'] {
   display: none;
 }
 
@@ -196,12 +266,12 @@
   transition: all 0.3s ease;
 }
 
-.checkbox-label input[type="checkbox"]:checked + .checkmark {
+.checkbox-label input[type='checkbox']:checked + .checkmark {
   background: #3b82f6;
   border-color: #3b82f6;
 }
 
-.checkbox-label input[type="checkbox"]:checked + .checkmark::after {
+.checkbox-label input[type='checkbox']:checked + .checkmark::after {
   content: '✓';
   position: absolute;
   top: 50%;
@@ -266,8 +336,12 @@
 }
 
 @keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 /* Register Link */
@@ -380,6 +454,61 @@
   background: linear-gradient(135deg, #2563eb, #1d4ed8);
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+/* Admin Info Section */
+.admin-info {
+  background: rgba(168, 85, 247, 0.1);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(168, 85, 247, 0.2);
+  border-radius: 1rem;
+  padding: 2rem;
+}
+
+.admin-info h3 {
+  font-size: 1.5rem;
+  font-weight: bold;
+  margin-bottom: 1rem;
+  color: #c084fc;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.admin-info p {
+  color: #bfdbfe;
+  margin-bottom: 1.5rem;
+  line-height: 1.5;
+}
+
+.admin-features {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.feature-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 0.5rem;
+  border: 1px solid rgba(168, 85, 247, 0.1);
+  transition: all 0.3s ease;
+}
+
+.feature-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(168, 85, 247, 0.2);
+}
+
+.feature-icon {
+  font-size: 1.2rem;
+}
+
+.feature-item span:not(.feature-icon) {
+  color: #e2e8f0;
+  font-weight: 500;
 }
 
 /* Modal Styles */
@@ -507,28 +636,34 @@
   .login-container {
     padding: 0 15px;
   }
-  
+
   .login-header {
     flex-direction: column;
     text-align: center;
   }
-  
+
   .login-card {
     padding: 1.5rem;
   }
-  
+
   .card-header h2 {
     font-size: 1.75rem;
   }
-  
-  .quick-access {
+
+  .quick-access,
+  .admin-info {
     padding: 1.5rem;
   }
-  
+
   .form-options {
     flex-direction: column;
     align-items: flex-start;
     gap: 0.5rem;
+  }
+
+  .user-type-selector {
+    flex-direction: column;
+    gap: 0.75rem;
   }
 }
 
@@ -536,41 +671,82 @@
   .login-card {
     padding: 1rem;
   }
-  
-  .quick-access {
+
+  .quick-access,
+  .admin-info {
     padding: 1rem;
   }
-  
+
   .card-header {
     margin-bottom: 1.5rem;
   }
-  
+
   .card-header h2 {
     font-size: 1.5rem;
   }
-  
+
   .card-header p {
     font-size: 0.875rem;
   }
-  
+
   .login-form {
     gap: 1rem;
   }
-  
+
   .form-group input {
     padding: 0.625rem;
   }
-  
+
   .modal-content {
     width: 95%;
   }
-  
+
   .modal-header,
   .modal-body {
     padding: 1rem;
   }
-  
+
   .modal-actions {
     flex-direction: column;
   }
+
+  .user-type-selector {
+    gap: 0.5rem;
+  }
+
+  .radio-label {
+    padding: 0.5rem;
+  }
+}
+.radio-text {
+  color: white;
+}
+
+.user-icon,
+.admin-icon {
+  color: white;
+}
+.form-group label {
+  font-weight: 500;
+  color: white; /* previously #e2e8f0 */
+  font-size: 0.875rem;
+}
+.form-group input {
+  color: white;
+}
+
+.form-group input::placeholder {
+  color: white;
+}
+.radio-label span {
+  color: white;
+}
+.checkbox-label {
+  color: white;
+}
+.feature-icon {
+  color: white; /* Add this */
+}
+.shield-icon {
+  color: white;
 }

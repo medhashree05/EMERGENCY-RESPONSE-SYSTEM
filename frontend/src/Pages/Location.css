@@ -175,7 +175,8 @@
   color: #f59e0b;
 }
 
-.enable-btn, .share-btn {
+.enable-btn,
+.share-btn {
   padding: 0.75rem 1.5rem;
   border: none;
   border-radius: 0.5rem;
@@ -226,7 +227,6 @@
   display: block;
   margin-bottom: 5px;
   font-weight: 600;
-  color: #2c3e50;
 }
 
 .form-group input {
@@ -370,27 +370,27 @@
     padding: 20px;
     margin: 20px;
   }
-  
+
   .form-row {
     flex-direction: column;
     gap: 10px;
   }
-  
+
   .modal-actions {
     flex-direction: column;
   }
-  
+
   .location-actions {
     flex-direction: column;
   }
-  
+
   .location-actions .location-btn,
   .location-actions .delete-btn {
     width: 100%;
   }
 }
-.contact{
-    padding: 0.75rem 1.5rem;
+.contact {
+  padding: 0.75rem 1.5rem;
   border: none;
   border-radius: 0.5rem;
   font-weight: 600;
@@ -427,8 +427,13 @@
 }
 
 @keyframes pulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.02); }
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.02);
+  }
 }
 
 /* Map Section */
@@ -480,8 +485,12 @@
 }
 
 @keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 /* Saved Locations Section */
@@ -657,7 +666,8 @@
   gap: 0.5rem;
 }
 
-.call-btn, .message-btn {
+.call-btn,
+.message-btn {
   flex: 1;
   padding: 0.5rem 1rem;
   border: none;
