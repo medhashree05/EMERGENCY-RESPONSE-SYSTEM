@@ -7,6 +7,7 @@ function Login() {
   const [formData, setFormData] = useState({
     email: '',
     password: '',
+    userType: 'user', // Default to user
     rememberMe: false,
   })
   const navigate = useNavigate()
@@ -44,6 +45,10 @@ function Login() {
       newErrors.password = 'Password is required'
     }
 
+    if (!formData.userType) {
+      newErrors.userType = 'Please select user type'
+    }
+
     return newErrors
   }
 
@@ -65,18 +70,33 @@ function Login() {
         body: JSON.stringify({
           email: formData.email,
           password: formData.password,
+          userType: formData.userType,
         }),
       })
 
       const data = await response.json()
 
       if (response.ok) {
-        alert('Login successful! Welcome back.')
+        alert(
+          `${
+            formData.userType === 'admin' ? 'Admin' : 'User'
+          } login successful! Welcome back.`
+        )
         localStorage.setItem('user', JSON.stringify(data.user))
-        localStorage.setItem('token', data.token) 
-        navigate('/') 
+        localStorage.setItem('token', data.token)
+        localStorage.setItem(
+          'userType',
+          data.user.userType || formData.userType
+        )
+
+        // Navigate based on user type
+        if (data.user.userType === 'admin' || formData.userType === 'admin') {
+          navigate('/admin-dashboard') // Navigate to admin dashboard
+        } else {
+          navigate('/') // Navigate to user dashboard
+        }
       } else {
-        setErrors({ general: data.error || 'Invalid email or password' })
+        setErrors({ general: data.error || 'Invalid credentials' })
       }
     } catch (err) {
       console.error('Login error:', err)
@@ -147,6 +167,43 @@ function Login() {
 
               <form className="login-form" onSubmit={handleSubmit}>
                 <div className="form-group">
+                  <label>User Type</label>
+                  <div className="user-type-selector">
+                    <label className="radio-label">
+                      <input
+                        type="radio"
+                        name="userType"
+                        value="user"
+                        checked={formData.userType === 'user'}
+                        onChange={handleChange}
+                      />
+                      <span className="radio-custom"></span>
+                      <span className="radio-text">
+                        <span className="user-icon">👤</span>
+                        User
+                      </span>
+                    </label>
+                    <label className="radio-label">
+                      <input
+                        type="radio"
+                        name="userType"
+                        value="admin"
+                        checked={formData.userType === 'admin'}
+                        onChange={handleChange}
+                      />
+                      <span className="radio-custom"></span>
+                      <span className="radio-text">
+                        <span className="admin-icon">⚙️</span>
+                        Admin
+                      </span>
+                    </label>
+                  </div>
+                  {errors.userType && (
+                    <span className="error-message">{errors.userType}</span>
+                  )}
+                </div>
+
+                <div className="form-group">
                   <label>Email Address</label>
                   <input
                     type="email"
@@ -210,7 +267,9 @@ function Login() {
                       Signing In...
                     </>
                   ) : (
-                    'Sign In'
+                    `Sign In as ${
+                      formData.userType === 'admin' ? 'Admin' : 'User'
+                    }`
                   )}
                 </button>
               </form>
@@ -225,40 +284,71 @@ function Login() {
               </div>
             </div>
 
-            {/* Quick Access */}
-            <div className="quick-access">
-              <h3>Emergency Quick Access</h3>
-              <p>
-                For immediate emergencies, you can access these services without
-                logging in:
-              </p>
-              <div className="quick-access-buttons">
-                <button
-                  className="quick-btn emergency"
-                  onClick={handleTextChat}
-                >
-                  🚨 Emergency Chat
-                </button>
-                <button
-                  className="quick-btn medical"
-                  onClick={() => handleQuickAccess('medical')}
-                >
-                  🏥 Medical Emergency
-                </button>
-                <button
-                  className="quick-btn fire"
-                  onClick={() => handleQuickAccess('fire')}
-                >
-                  🔥 Fire Emergency
-                </button>
-                <button
-                  className="quick-btn police"
-                  onClick={() => handleQuickAccess('police')}
-                >
-                  👮 Police Emergency
-                </button>
+            {/* Quick Access - Only show for user type */}
+            {formData.userType === 'user' && (
+              <div className="quick-access">
+                <h3>Emergency Quick Access</h3>
+                <p>
+                  For immediate emergencies, you can access these services
+                  without logging in:
+                </p>
+                <div className="quick-access-buttons">
+                  <button
+                    className="quick-btn emergency"
+                    onClick={handleTextChat}
+                  >
+                    🚨 Emergency Chat
+                  </button>
+                  <button
+                    className="quick-btn medical"
+                    onClick={() => handleQuickAccess('medical')}
+                  >
+                    🏥 Medical Emergency
+                  </button>
+                  <button
+                    className="quick-btn fire"
+                    onClick={() => handleQuickAccess('fire')}
+                  >
+                    🔥 Fire Emergency
+                  </button>
+                  <button
+                    className="quick-btn police"
+                    onClick={() => handleQuickAccess('police')}
+                  >
+                    👮 Police Emergency
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
+
+            {/* Admin Info - Only show for admin type */}
+            {formData.userType === 'admin' && (
+              <div className="admin-info">
+                <h3>Admin Access</h3>
+                <p>
+                  You are signing in as an administrator. You will have access
+                  to:
+                </p>
+                <div className="admin-features">
+                  <div className="feature-item">
+                    <span className="feature-icon">📊</span>
+                    <span>System Analytics & Reports</span>
+                  </div>
+                  <div className="feature-item">
+                    <span className="feature-icon">👥</span>
+                    <span>User Management</span>
+                  </div>
+                  <div className="feature-item">
+                    <span className="feature-icon">🚨</span>
+                    <span>Emergency Response Monitoring</span>
+                  </div>
+                  <div className="feature-item">
+                    <span className="feature-icon">⚙️</span>
+                    <span>System Configuration</span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

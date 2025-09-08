@@ -8,13 +8,57 @@ const crypto = require('crypto')
 const { createClient } = require('@supabase/supabase-js')
 const jwt = require('jsonwebtoken')
 const Groq = require('groq-sdk')   // 👈 Import Groq SDK
-
+const multer = require('multer')
+const fs = require('fs')
+const path = require('path')
+const { spawn } = require('child_process')
 dotenv.config()
 const app = express()
 app.use(cors())
 app.use(express.json())
 
 const PORT = process.env.PORT || 8000
+
+
+// Replace the simple upload configuration
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      const uploadsDir = path.join(__dirname, 'uploads');
+      // Create directory if it doesn't exist
+      if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      }
+      cb(null, uploadsDir);
+    },
+    filename: (req, file, cb) => {
+      // Generate unique filename with proper extension
+      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+      const ext = path.extname(file.originalname) || '.webm';
+      cb(null, `audio-${uniqueSuffix}${ext}`);
+    }
+  }),
+  limits: { 
+    fileSize: 25 * 1024 * 1024 // 25MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedMimes = [
+      'audio/webm',
+      'audio/wav', 
+      'audio/mp3',
+      'audio/mp4',
+      'audio/mpeg',
+      'audio/ogg',
+      'audio/opus'
+    ];
+    
+    if (allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Unsupported audio format: ${file.mimetype}`), false);
+    }
+  }
+});
 
 // --------------------
 // Twilio setup
@@ -78,6 +122,20 @@ function authenticateToken(req, res, next) {
 
   jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
     if (err) return res.sendStatus(403)
+    req.user = user
+    next()
+  })
+}
+function authenticateAdmin(req, res, next) {
+  const authHeader = req.headers['authorization']
+  const token = authHeader && authHeader.split(' ')[1]
+  if (!token) return res.status(401).json({ error: 'Admin access required' })
+
+  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ error: 'Invalid admin token' })
+    if (user.userType !== 'admin') {
+      return res.status(403).json({ error: 'Admin privileges required' })
+    }
     req.user = user
     next()
   })
@@ -296,6 +354,221 @@ app.post('/resend_otp', async (req, res) => {
   }
 })
 
+app.put('/admin/change-password', authenticateAdmin, async (req, res) => {
+  try {
+    const { current_password, new_password } = req.body
+
+    if (!current_password || !new_password) {
+      return res.status(400).json({
+        error: 'Current password and new password are required',
+      })
+    }
+
+    // Get current admin data
+    const { data: admin, error } = await supabase
+      .from('admin_users')
+      .select('password_hash')
+      .eq('id', req.user.user_id)
+      .single()
+
+    if (error || !admin) {
+      return res.status(404).json({ error: 'Admin user not found' })
+    }
+
+    // Verify current password
+    const isValidPassword = await bcrypt.compare(
+      current_password,
+      admin.password_hash
+    )
+    if (!isValidPassword) {
+      return res.status(401).json({ error: 'Current password is incorrect' })
+    }
+
+    // Hash new password
+    const hashedNewPassword = await bcrypt.hash(new_password, 12)
+
+    // Update password
+    const { error: updateError } = await supabase
+      .from('admin_users')
+      .update({ password_hash: hashedNewPassword })
+      .eq('id', req.user.user_id)
+
+    if (updateError) {
+      console.error('Password update error:', updateError)
+      return res.status(500).json({ error: 'Failed to update password' })
+    }
+
+    res.json({ message: 'Password updated successfully' })
+  } catch (err) {
+    console.error('Change password error:', err)
+    res.status(500).json({ error: 'Something went wrong' })
+  }
+})
+
+app.put('/admin/users/:id/status', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+    const { is_active } = req.body
+
+    // Check if requesting user has super admin privileges
+    const { data: requestingAdmin } = await supabase
+      .from('admin_users')
+      .select('role')
+      .eq('id', req.user.user_id)
+      .single()
+
+    if (requestingAdmin?.role !== 'super_admin') {
+      return res.status(403).json({
+        error: 'Only super administrators can modify admin user status',
+      })
+    }
+
+    // Don't allow deactivating yourself
+    if (id === req.user.user_id && !is_active) {
+      return res.status(400).json({
+        error: 'You cannot deactivate your own account',
+      })
+    }
+
+    const { error } = await supabase
+      .from('admin_users')
+      .update({ is_active })
+      .eq('id', id)
+
+    if (error) {
+      console.error('Update admin status error:', error)
+      return res.status(500).json({ error: 'Failed to update admin status' })
+    }
+
+    res.json({
+      message: `Admin user ${
+        is_active ? 'activated' : 'deactivated'
+      } successfully`,
+    })
+  } catch (err) {
+    console.error('Update admin status error:', err)
+    res.status(500).json({ error: 'Something went wrong' })
+  }
+})
+
+app.get('/admin/users', authenticateAdmin, async (req, res) => {
+  try {
+    const { data: admins, error } = await supabase
+      .from('admin_users')
+      .select(
+        'id, first_name, last_name, email, role, is_active, created_at, last_login'
+      )
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('Fetch admins error:', error)
+      return res.status(500).json({ error: 'Failed to fetch admin users' })
+    }
+
+    res.json({ admins })
+  } catch (err) {
+    console.error('Get admin users error:', err)
+    res.status(500).json({ error: 'Something went wrong' })
+  }
+})
+
+app.post('/admin/create', authenticateAdmin, async (req, res) => {
+  try {
+    const { first_name, last_name, email, password, role = 'admin' } = req.body
+
+    // Check if requesting user has super admin privileges
+    const { data: requestingAdmin } = await supabase
+      .from('admin_users')
+      .select('role')
+      .eq('id', req.user.user_id)
+      .single()
+
+    if (requestingAdmin?.role !== 'super_admin') {
+      return res.status(403).json({
+        error: 'Only super administrators can create new admin users',
+      })
+    }
+
+    // Validate input
+    if (!first_name || !last_name || !email || !password) {
+      return res.status(400).json({
+        error: 'All fields are required',
+      })
+    }
+
+    // Check if admin already exists
+    const { data: existingAdmin } = await supabase
+      .from('admin_users')
+      .select('id')
+      .eq('email', email)
+      .single()
+
+    if (existingAdmin) {
+      return res.status(400).json({
+        error: 'Admin user with this email already exists',
+      })
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 12)
+
+    // Create admin user
+    const { data: newAdmin, error } = await supabase
+      .from('admin_users')
+      .insert([
+        {
+          first_name,
+          last_name,
+          email,
+          password_hash: hashedPassword,
+          role,
+          is_active: true,
+          created_by: req.user.user_id,
+        },
+      ])
+      .select('id, first_name, last_name, email, role, is_active, created_at')
+      .single()
+
+    if (error) {
+      console.error('Create admin error:', error)
+      return res.status(500).json({ error: 'Failed to create admin user' })
+    }
+
+    res.status(201).json({
+      message: 'Admin user created successfully',
+      admin: newAdmin,
+    })
+  } catch (err) {
+    console.error('Create admin error:', err)
+    res.status(500).json({ error: 'Something went wrong' })
+  }
+})
+app.put('/user/change-password', authenticateToken, async (req, res) => {
+  try {
+    const { current_password, new_password } = req.body
+    const { data: user } = await supabase
+      .from('users')
+      .select('password_hash')
+      .eq('id', req.user.user_id)
+      .single()
+
+    if (!user) return res.status(404).json({ error: 'User not found' })
+    const isValid = await bcrypt.compare(current_password, user.password_hash)
+    if (!isValid)
+      return res.status(401).json({ error: 'Incorrect current password' })
+
+    const hashedNewPassword = await bcrypt.hash(new_password, 12)
+    await supabase
+      .from('users')
+      .update({ password_hash: hashedNewPassword })
+      .eq('id', req.user.user_id)
+
+    res.json({ message: 'Password updated successfully' })
+  } catch (err) {
+    console.error('Change password error:', err)
+    res.status(500).json({ error: 'Something went wrong' })
+  }
+})
 // --------------------
 // Profile routes
 // --------------------
@@ -1071,6 +1344,104 @@ app.post('/location/send-emergency-alert', authenticateToken, async (req, res) =
   }
 });
 
+
+
+app.post('/get-nearby-services', async (req, res) => {
+  try {
+    const { lat, lng } = req.body // front-end sends current location
+
+    const types = ['police', 'hospital', 'fire_station']
+    const results = {}
+
+    for (const type of types) {
+      const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=5000&type=${type}&key=${process.env.GOOGLE_PLACES_API_KEY}`
+      const response = await fetch(url)
+      const data = await response.json()
+
+      results[type] = data.results.map((place) => ({
+        name: place.name,
+        address: place.vicinity,
+        location: place.geometry.location,
+        rating: place.rating || 'N/A',
+        phone: place.formatted_phone_number || 'Not Available',
+      }))
+    }
+
+    res.json({
+      success: true,
+      nearby: results,
+    })
+  } catch (err) {
+    console.error('Error fetching services:', err.message)
+    res.status(500).json({ success: false, error: 'Failed to fetch services' })
+  }
+})
+
+
+app.post('/transcribe', upload.single('file'), async (req, res) => {
+  let filePath = null;
+  
+  try {
+    if (!req.file) {
+      return res
+        .status(400)
+        .json({ success: false, error: 'No audio file received' });
+    }
+
+    filePath = req.file.path; // ✅ Now this exists because we use diskStorage
+    
+    console.log('Processing audio file:', {
+      filename: req.file.filename,
+      mimetype: req.file.mimetype,
+      size: req.file.size,
+      path: filePath
+    });
+
+    // ✅ Check if file actually exists
+    if (!fs.existsSync(filePath)) {
+      throw new Error('Uploaded file not found on disk');
+    }
+
+    const transcription = await groq.audio.transcriptions.create({
+      file: fs.createReadStream(filePath),
+      model: 'whisper-large-v3',
+    });
+
+    // ✅ Clean up the temporary file
+    fs.unlinkSync(filePath);
+    
+    console.log('Transcription successful:', transcription.text?.substring(0, 100) + '...');
+
+    res.json({ 
+      success: true, 
+      text: transcription.text 
+    });
+
+  } catch (err) {
+    console.error('Error transcribing audio:', err.message);
+    
+    // ✅ Clean up file even if transcription fails
+    if (filePath && fs.existsSync(filePath)) {
+      try {
+        fs.unlinkSync(filePath);
+      } catch (cleanupErr) {
+        console.error('Error cleaning up file:', cleanupErr.message);
+      }
+    }
+
+    // ✅ Return more specific error messages
+    let errorMessage = 'Failed to transcribe audio';
+    if (err.message.includes('Unsupported audio format')) {
+      errorMessage = 'Audio format not supported. Please try again.';
+    } else if (err.message.includes('File too large')) {
+      errorMessage = 'Audio file is too large. Please record a shorter message.';
+    }
+
+    res
+      .status(500)
+      .json({ success: false, error: errorMessage });
+  }
+});
 
 
 

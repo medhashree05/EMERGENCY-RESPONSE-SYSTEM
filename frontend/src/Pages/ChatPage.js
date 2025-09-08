@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import './VoiceRecorder.css' // ✅ Import recorder CSS
+import VoiceRecorder from './VoiceRecorder'
 import './ChatPage.css';
 
 function ChatPage() {
@@ -26,52 +28,53 @@ function ChatPage() {
   }, [messages]);
 
   // ---- Single handleSendMessage that calls backend ----
-  const handleSendMessage = async () => {
-    if (inputText.trim() === '') return;
 
-    const userMessage = {
-      id: Date.now(),
-      text: inputText,
-      sender: 'user',
-      timestamp: new Date()
-    };
+async function handleSendMessage(textOverride = null) {
+  const messageText = String(textOverride ?? inputText).trim();  // ✅ always a string
+  if (!messageText) return;
 
-    setMessages(prev => [...prev, userMessage]);
-    setInputText('');
-    setIsTyping(true);
-
-    try {
-      const res = await fetch('http://localhost:8000/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: inputText }),
-      });
-
-      const data = await res.json();
-      console.log(data);
-      const aiMessage = {
-        id: Date.now() + 1,
-        text: data.reply || "⚠️ Sorry, I couldn't process that.",
-        sender: 'ai',
-        timestamp: new Date(),
-        isUrgent: false
-      };
-
-      setMessages(prev => [...prev, aiMessage]);
-    } catch (err) {
-      console.error('Chat error:', err);
-      const errorMessage = {
-        id: Date.now() + 2,
-        text: "⚠️ Network error. Please try again.",
-        sender: 'ai',
-        timestamp: new Date(),
-        isUrgent: false
-      };
-      setMessages(prev => [...prev, errorMessage]);
-    } finally {
-      setIsTyping(false);
-    }
+  const newMessage = {
+    text: messageText,
+    sender: 'user',
+    timestamp: new Date(),
   };
+
+  setMessages((prev) => [...prev, newMessage]);
+  setInputText('');
+  setIsTyping(true);
+
+  try {
+    const res = await fetch('http://localhost:8000/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: messageText }),  // ✅ safe
+    });
+
+    const data = await res.json();
+    const aiResponse =
+      data.reply || '⚠️ Sorry, I could not process that.';
+
+    setMessages((prev) => [
+      ...prev,
+      { text: aiResponse, sender: 'ai', timestamp: new Date() },
+    ]);
+  } catch (error) {
+    console.error('Error fetching AI response:', error);
+    setMessages((prev) => [
+      ...prev,
+      {
+        text: '⚠️ Network error. Please try again.',
+        sender: 'ai',
+        timestamp: new Date(),
+      },
+    ]);
+  } finally {
+    setIsTyping(false);
+  }
+}
+
+
+
 
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -177,37 +180,44 @@ function ChatPage() {
       {/* Quick Response Buttons */}
       <div className="quick-responses">
         <div className="quick-responses-container">
-          {quickResponses.map((response, index) => (
-            <button
-              key={index}
-              className="quick-response-btn"
-              onClick={() => setInputText(response)}
-            >
-              {response}
-            </button>
-          ))}
+          {quickResponses.map((text, idx) => (
+  <button 
+    key={idx} 
+    className="quick-response-btn"
+    onClick={() => handleSendMessage(text)}  // ✅ directly sends
+  >
+    {text}
+  </button>
+))}
+
         </div>
       </div>
 
       {/* Input Area */}
       <div className="chat-input-area">
-        <div className="chat-input-container">
-          <textarea
-            className="chat-input"
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="Type your message here... For emergencies, call 911 immediately."
-            rows="1"
-          />
-          <button 
-            className="send-button"
-            onClick={handleSendMessage}
-            disabled={inputText.trim() === ''}
-          >
-            <span className="send-icon">➤</span>
-          </button>
-        </div>
+       <div className="chat-input-container">
+  <textarea
+    className="chat-input"
+    value={inputText}
+    onChange={(e) => setInputText(e.target.value)}
+    onKeyPress={handleKeyPress}
+    placeholder="Type your message here... For emergencies, call 911 immediately."
+    rows="1"
+    disabled={isTyping}   // ✅ block typing while AI responds
+  />
+  <button 
+    className="send-button"
+    onClick={() => handleSendMessage()}
+    disabled={inputText.trim() === '' || isTyping} // ✅ disable send while typing
+  >
+    <span className="send-icon">➤</span>
+  </button>
+
+  {/* 🎤 Voice Recorder support */}
+  <VoiceRecorder onSendAudio={handleSendMessage} />
+</div>
+
+
       </div>
     </div>
   );
