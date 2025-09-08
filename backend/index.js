@@ -12,6 +12,7 @@ const multer = require('multer')
 const fs = require('fs')
 const path = require('path')
 const { spawn } = require('child_process')
+const { Console } = require('console')
 dotenv.config()
 const app = express()
 app.use(cors())
@@ -316,12 +317,86 @@ app.post('/login', async (req, res) => {
   }
 })
 
-// 4️⃣ Protected route example
-app.get('/protected', authenticateToken, (req, res) => {
-  res.json({
-    message: 'You have access to this protected route',
-    user: req.user,
-  })
+// Add this route to your existing backend/index.js file after the regular user login route
+
+// Admin Login Route with Detailed Logs
+// Admin Login Route without is_active check
+app.post('/admin/login', async (req, res) => {
+  try {
+    const { email, password } = req.body
+    console.log('🟡 Incoming admin login request:', { email })
+
+    // Validate input
+    if (!email || !password) {
+      console.warn('⚠️ Missing email or password')
+      return res.status(400).json({ error: 'Email and password are required' })
+    }
+
+    console.log('🔍 Fetching admin user from database...')
+    const { data: admin, error } = await supabase
+      .from('admin')
+      .select(
+        'id, first_name, last_name, email_address, password, last_login, calls_attended'
+      )
+      .eq('email_address', email.toLowerCase().trim())
+      .single()
+
+    console.log('📄 Supabase response:', { admin, error })
+
+    if (error || !admin) {
+      console.error('❌ Admin not found or Supabase error:', error)
+      return res.status(401).json({ error: 'Invalid email or password' })
+    }
+
+    console.log('🔑 Verifying password...')
+    const isValidPassword = await bcrypt.compare(password, admin.password)
+    console.log('Password check result:', isValidPassword)
+
+    if (!isValidPassword) {
+      console.warn('🚫 Invalid password for admin:', admin.email_address)
+      return res.status(401).json({ error: 'Invalid email or password' })
+    }
+
+    console.log('⏱ Updating last login timestamp...')
+    const { error: updateError } = await supabase
+      .from('admin')
+      .update({ last_login: new Date().toISOString() })
+      .eq('id', admin.id)
+
+    if (updateError) {
+      console.error('⚠️ Failed to update last_login:', updateError)
+    } else {
+      console.log('✅ Last login updated successfully')
+    }
+
+    console.log('🔐 Generating JWT token...')
+    const token = jwt.sign(
+      {
+        user_id: admin.id,
+        email: admin.email_address,
+        userType: 'admin',
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '8h' }
+    )
+
+    console.log(`✅ Admin login successful: ${admin.email_address}`)
+
+    res.json({
+      message: 'Admin login successful',
+      admin: {
+        id: admin.id,
+        email: admin.email_address,
+        first_name: admin.first_name,
+        last_name: admin.last_name,
+        last_login: admin.last_login,
+      },
+      token,
+    })
+  } catch (err) {
+    console.error('🔥 Admin login error:', err)
+    res.status(500).json({ error: 'Something went wrong during admin login' })
+  }
 })
 
 // 5️⃣ Resend OTP

@@ -64,43 +64,85 @@ function Login() {
     setIsLoading(true)
 
     try {
-      const response = await fetch('http://localhost:8000/login', {
+      // 🎯 Select endpoint based on user type
+      const endpoint =
+        formData.userType === 'admin'
+          ? 'http://localhost:8000/admin/login' // Admin login endpoint
+          : 'http://localhost:8000/login' // Regular user login endpoint
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: formData.email,
           password: formData.password,
-          userType: formData.userType,
+          // Note: userType is only sent to regular login, admin/login doesn't need it
+          ...(formData.userType === 'user' && { userType: formData.userType }),
         }),
       })
 
       const data = await response.json()
 
       if (response.ok) {
+        // 🎯 Handle different response structures
+        const isAdmin = formData.userType === 'admin'
+        const userData = isAdmin ? data.admin : data.user
+        const userType = isAdmin ? 'admin' : 'user'
+
         alert(
-          `${
-            formData.userType === 'admin' ? 'Admin' : 'User'
-          } login successful! Welcome back.`
-        )
-        localStorage.setItem('user', JSON.stringify(data.user))
-        localStorage.setItem('token', data.token)
-        localStorage.setItem(
-          'userType',
-          data.user.userType || formData.userType
+          `${isAdmin ? 'Admin' : 'User'} login successful! Welcome back${
+            userData.first_name ? `, ${userData.first_name}` : ''
+          }.`
         )
 
-        // Navigate based on user type
-        if (data.user.userType === 'admin' || formData.userType === 'admin') {
+        // 🎯 Store user data with consistent structure
+        const userToStore = {
+          ...userData,
+          userType: userType,
+          // Add role for admin users
+          ...(isAdmin && { role: userData.role }),
+        }
+
+        localStorage.setItem('user', JSON.stringify(userToStore))
+        localStorage.setItem('token', data.token)
+        localStorage.setItem('userType', userType)
+
+        // 🎯 Navigate based on user type
+        if (isAdmin) {
           navigate('/admin-dashboard') // Navigate to admin dashboard
         } else {
-          navigate('/') // Navigate to user dashboard
+          navigate('/') // Navigate to user dashboard/home
         }
       } else {
-        setErrors({ general: data.error || 'Invalid credentials' })
+        // 🎯 Handle different error response structures
+        const errorMessage = data.error || data.message || 'Invalid credentials'
+
+        // Show more specific error messages for admin login
+        if (formData.userType === 'admin') {
+          if (errorMessage.includes('deactivated')) {
+            setErrors({
+              general:
+                'Your admin account has been deactivated. Please contact the super administrator.',
+            })
+          } else if (errorMessage.includes('Invalid email or password')) {
+            setErrors({
+              general:
+                'Invalid admin credentials. Please check your email and password.',
+            })
+          } else {
+            setErrors({ general: errorMessage })
+          }
+        } else {
+          setErrors({ general: errorMessage })
+        }
       }
     } catch (err) {
       console.error('Login error:', err)
-      setErrors({ general: 'Something went wrong. Please try again.' })
+      setErrors({
+        general: `${
+          formData.userType === 'admin' ? 'Admin l' : 'L'
+        }ogin failed. Please check your connection and try again.`,
+      })
     } finally {
       setIsLoading(false)
     }
@@ -120,6 +162,8 @@ function Login() {
       return
     }
 
+    // 🎯 Note: This is using Supabase auth for password reset
+    // For admin users, you might want to implement a separate admin password reset
     const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
       redirectTo: 'http://localhost:3000/reset-password',
     })
@@ -155,7 +199,11 @@ function Login() {
             <div className="login-card">
               <div className="card-header">
                 <h2>Welcome Back</h2>
-                <p>Sign in to access your emergency response dashboard</p>
+                <p>
+                  {formData.userType === 'admin'
+                    ? 'Admin sign-in to access system management'
+                    : 'Sign in to access your emergency response dashboard'}
+                </p>
               </div>
 
               {errors.general && (
@@ -211,7 +259,11 @@ function Login() {
                     value={formData.email}
                     onChange={handleChange}
                     className={errors.email ? 'error' : ''}
-                    placeholder="Enter your email address"
+                    placeholder={
+                      formData.userType === 'admin'
+                        ? 'Enter your admin email address'
+                        : 'Enter your email address'
+                    }
                     autoComplete="email"
                   />
                   {errors.email && (
@@ -227,7 +279,11 @@ function Login() {
                     value={formData.password}
                     onChange={handleChange}
                     className={errors.password ? 'error' : ''}
-                    placeholder="Enter your password"
+                    placeholder={
+                      formData.userType === 'admin'
+                        ? 'Enter your admin password'
+                        : 'Enter your password'
+                    }
                     autoComplete="current-password"
                   />
                   {errors.password && (
@@ -247,13 +303,23 @@ function Login() {
                     Remember me
                   </label>
 
-                  <button
-                    type="button"
-                    className="forgot-password-btn"
-                    onClick={() => setShowForgotPassword(true)}
-                  >
-                    Forgot Password?
-                  </button>
+                  {/* Only show forgot password for regular users */}
+                  {formData.userType === 'user' && (
+                    <button
+                      type="button"
+                      className="forgot-password-btn"
+                      onClick={() => setShowForgotPassword(true)}
+                    >
+                      Forgot Password?
+                    </button>
+                  )}
+
+                  {/* Show admin contact info instead */}
+                  {formData.userType === 'admin' && (
+                    <span className="admin-help-text">
+                      Contact super admin for password reset
+                    </span>
+                  )}
                 </div>
 
                 <button
@@ -274,14 +340,28 @@ function Login() {
                 </button>
               </form>
 
-              <div className="register-link">
-                <p>
-                  Don't have an account?{' '}
-                  <button onClick={handleGoToRegister} className="link-btn">
-                    Create one here
-                  </button>
-                </p>
-              </div>
+              {/* Only show register link for users */}
+              {formData.userType === 'user' && (
+                <div className="register-link">
+                  <p>
+                    Don't have an account?{' '}
+                    <button onClick={handleGoToRegister} className="link-btn">
+                      Create one here
+                    </button>
+                  </p>
+                </div>
+              )}
+
+              {/* Admin registration note */}
+              {formData.userType === 'admin' && (
+                <div className="admin-register-note">
+                  <p>
+                    <small>
+                      Admin accounts are created by super administrators only.
+                    </small>
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Quick Access - Only show for user type */}
@@ -352,8 +432,8 @@ function Login() {
           </div>
         </div>
 
-        {/* Forgot Password Modal */}
-        {showForgotPassword && (
+        {/* Forgot Password Modal - Only for regular users */}
+        {showForgotPassword && formData.userType === 'user' && (
           <div
             className="modal-overlay"
             onClick={() => setShowForgotPassword(false)}
