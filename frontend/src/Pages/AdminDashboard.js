@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { supabase } from '../supabaseClient' // Make sure you have this import
 import './AdminDashboard.css'
 
 function AdminDashboard() {
@@ -13,6 +14,7 @@ function AdminDashboard() {
   })
   const [recentEmergencies, setRecentEmergencies] = useState([])
   const [loading, setLoading] = useState(true)
+  const [emergenciesLoading, setEmergenciesLoading] = useState(false)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -20,100 +22,207 @@ function AdminDashboard() {
       setCurrentTime(new Date())
     }, 1000)
 
-    // Load admin data and system statistics
     loadAdminData()
     loadSystemStats()
     loadRecentEmergencies()
 
-    return () => clearInterval(timer)
+    // Set up real-time subscription for emergencies
+    const emergenciesSubscription = supabase
+      .channel('emergencies_changes')
+      .on('postgres_changes', 
+          { event: '*', schema: 'public', table: 'emergencies' },
+          (payload) => {
+            console.log('Emergency data changed:', payload)
+            loadRecentEmergencies() // Reload emergencies when data changes
+          }
+      )
+      .subscribe()
+
+    return () => {
+      clearInterval(timer)
+      emergenciesSubscription.unsubscribe()
+    }
   }, [])
 
   const loadAdminData = async () => {
-    try {
-      const token = localStorage.getItem('adminToken')
-      if (!token) {
-        navigate('/admin/login')
-        return
-      }
-
-      // Mock admin data - replace with actual API call
-      setAdminData({
-        id: 1,
-        first_name: 'Admin',
-        last_name: 'User',
-        email_address: 'admin@emergency.com',
-        last_login: new Date().toISOString(),
-        calls_attended: 125,
-      })
-    } catch (error) {
-      console.error('Error loading admin data:', error)
-    } finally {
-      setLoading(false)
+  try {
+    const token = localStorage.getItem('adminToken') || localStorage.getItem('token')
+    if (!token) {
+      navigate('/login')
+      return
     }
-  }
 
+    // ✅ Fetch the logged-in admin from Supabase
+    const { data, error } = await supabase
+      .from('admin') // your admin table
+      .select('id, first_name, last_name, email_address, last_login, calls_attended')
+      .single() // get one row (assuming 1 admin logged in)
+
+    if (error) {
+      console.error('Error fetching admin:', error)
+      return
+    }
+
+    setAdminData(data)
+  } catch (error) {
+    console.error('Error loading admin data:', error)
+  } finally {
+    setLoading(false)
+  }
+}
   const loadSystemStats = async () => {
     try {
-      // Mock system stats - replace with actual API calls
+      // Get total users count
+      const { count: totalUsers, error: usersError } = await supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+
+      if (usersError) {
+        console.error('Error fetching users count:', usersError)
+      }
+
+      // Get active emergencies count (assuming status 'active', 'responding', etc. are considered active)
+      const { count: activeEmergencies, error: activeError } = await supabase
+        .from('emergencies')
+        .select('*', { count: 'exact', head: true })
+        .in('status', ['Reported', 'responding', 'pending'])
+
+      if (activeError) {
+        console.error('Error fetching active emergencies:', activeError)
+      }
+
+      // Get total calls today
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const { count: totalCalls, error: callsError } = await supabase
+        .from('emergencies')
+        .select('*', { count: 'exact', head: true })
+        .gte('created_at', today.toISOString())
+
+      if (callsError) {
+        console.error('Error fetching today\'s calls:', callsError)
+      }
+
+      // Get resolved today count
+      const { count: resolvedToday, error: resolvedError } = await supabase
+        .from('emergencies')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'resolved')
+        .gte('updated_at', today.toISOString())
+
+      if (resolvedError) {
+        console.error('Error fetching resolved emergencies:', resolvedError)
+      }
+
       setSystemStats({
-        totalUsers: 1247,
-        activeEmergencies: 3,
-        totalCalls: 89,
-        resolvedToday: 12,
+        totalUsers: totalUsers || 0,
+        activeEmergencies: activeEmergencies || 0,
+        totalCalls: totalCalls || 0,
+        resolvedToday: resolvedToday || 0,
       })
     } catch (error) {
       console.error('Error loading system stats:', error)
+      // Keep default values on error
     }
   }
 
   const loadRecentEmergencies = async () => {
     try {
-      // Mock recent emergencies - replace with actual API call
-      setRecentEmergencies([
-        {
-          id: 1,
-          type: 'Medical',
-          user_name: 'John Smith',
-          location: 'Downtown Area',
-          time: '5 mins ago',
-          status: 'Active',
-          priority: 'High',
-        },
-        {
-          id: 2,
-          type: 'Fire',
-          user_name: 'Sarah Johnson',
-          location: 'Residential Block',
-          time: '12 mins ago',
-          status: 'Responding',
-          priority: 'Critical',
-        },
-        {
-          id: 3,
-          type: 'Police',
-          user_name: 'Mike Davis',
-          location: 'Shopping Mall',
-          time: '25 mins ago',
-          status: 'Resolved',
-          priority: 'Medium',
-        },
-      ])
+      setEmergenciesLoading(true)
+      
+      const { data: emergencies, error } = await supabase
+        .from('emergencies')
+        .select(`
+          *,
+          users (
+            first_name,
+            last_name
+          )
+        `)
+        .order('reported_time', { ascending: false })
+        .limit(10) // Get latest 10 emergencies
+
+      if (error) {
+        console.error('Error fetching emergencies:', error)
+        return
+      }
+
+      // Format the data to match your component's expected structure
+      const formattedEmergencies = emergencies?.map(emergency => ({
+        id: emergency.id,
+        type: emergency.emergency_type || 'Unknown',
+        user_name: emergency.users 
+          ? `${emergency.users.first_name} ${emergency.users.last_name}` 
+          : 'Unknown User',
+        location: emergency.location || 'Unknown Location',
+        time: formatTimeAgo(emergency.created_at),
+        status: emergency.status || 'Unknown',
+        priority: emergency.priority || 'Medium',
+        // Include raw data for potential future use
+        rawData: emergency
+      })) || []
+
+      setRecentEmergencies(formattedEmergencies)
     } catch (error) {
       console.error('Error loading recent emergencies:', error)
+    } finally {
+      setEmergenciesLoading(false)
     }
   }
 
+  // Helper function to format time ago
+  const formatTimeAgo = (timestamp) => {
+    const now = new Date()
+    const emergencyTime = new Date(timestamp)
+    const diffInMinutes = Math.floor((now - emergencyTime) / (1000 * 60))
+
+    if (diffInMinutes < 1) return 'Just now'
+    if (diffInMinutes < 60) return `${diffInMinutes} mins ago`
+    
+    const diffInHours = Math.floor(diffInMinutes / 60)
+    if (diffInHours < 24) return `${diffInHours} hours ago`
+    
+    const diffInDays = Math.floor(diffInHours / 24)
+    return `${diffInDays} days ago`
+  }
+
+  // Function to handle emergency actions
+  const handleEmergencyAction = async (emergencyId, action) => {
+    try {
+      if (action === 'view') {
+        // Navigate to emergency details or open modal
+        console.log('Viewing emergency:', emergencyId)
+        // You can implement a detailed view here
+      } else if (action === 'update') {
+        // You can implement status update functionality
+        console.log('Updating emergency:', emergencyId)
+        // Example: Open a modal to update status
+      }
+    } catch (error) {
+      console.error('Error handling emergency action:', error)
+    }
+  }
+
+  // Function to refresh emergencies manually
+  const refreshEmergencies = () => {
+    loadRecentEmergencies()
+    loadSystemStats() // Also refresh stats
+  }
+
   const handleProfile = () => {
-    navigate('/admin/profile')
+    navigate('/admin-profile')
   }
 
   const handleSettings = () => {
-    navigate('/admin/settings')
+    navigate('/admin-settings')
   }
 
   const handleLogout = () => {
     localStorage.removeItem('adminToken')
-    navigate('/admin/login')
+    localStorage.removeItem('token')
+    localStorage.removeItem('user')
+    localStorage.removeItem('userType')
+    navigate('/login')
   }
 
   const getStatusColor = (status) => {
@@ -124,6 +233,8 @@ function AdminDashboard() {
         return 'status-responding'
       case 'resolved':
         return 'status-resolved'
+      case 'pending':
+        return 'status-pending'
       default:
         return 'status-default'
     }
@@ -144,6 +255,23 @@ function AdminDashboard() {
     }
   }
 
+  const getEmergencyTypeIcon = (type) => {
+    switch (type.toLowerCase()) {
+      case 'medical':
+        return '❤️'
+      case 'fire':
+        return '🔥'
+      case 'police':
+        return '👮'
+      case 'accident':
+        return '🚗'
+      case 'natural disaster':
+        return '🌪️'
+      default:
+        return '🚨'
+    }
+  }
+
   if (loading) {
     return (
       <div className="admin-loading">
@@ -155,9 +283,9 @@ function AdminDashboard() {
 
   return (
     <div className="admin-dashboard">
-      {/* Header */}
+      {/* Header - Same for all admin pages */}
       <header className="admin-header">
-        <div className="container">
+        <div className="admin-container">
           <div className="header-content">
             <div className="logo-section">
               <div className="admin-logo">
@@ -192,7 +320,7 @@ function AdminDashboard() {
 
       {/* Navigation */}
       <nav className="admin-navigation">
-        <div className="container">
+        <div className="admin-container">
           <div className="nav-links">
             <button className="nav-link active">Dashboard</button>
             <button className="nav-link" onClick={handleProfile}>
@@ -210,7 +338,7 @@ function AdminDashboard() {
 
       {/* Main Content */}
       <main className="admin-main">
-        <div className="container">
+        <div className="admin-container">
           {/* System Statistics */}
           <section className="admin-stats-section">
             <h2>System Overview</h2>
@@ -291,7 +419,16 @@ function AdminDashboard() {
           <section className="admin-emergencies-section">
             <div className="section-header">
               <h3>Recent Emergency Reports</h3>
-              <span className="status-indicator">Live Updates</span>
+              <div className="section-actions">
+                <span className="status-indicator">Live Updates</span>
+                <button 
+                  className="refresh-btn" 
+                  onClick={refreshEmergencies}
+                  disabled={emergenciesLoading}
+                >
+                  {emergenciesLoading ? '🔄' : '↻'} Refresh
+                </button>
+              </div>
             </div>
 
             <div className="admin-emergencies-table">
@@ -302,58 +439,91 @@ function AdminDashboard() {
                 <div className="header-cell">Time</div>
                 <div className="header-cell">Status</div>
                 <div className="header-cell">Priority</div>
+                <div className="header-cell">Assigned To</div>
                 <div className="header-cell">Actions</div>
               </div>
 
-              {recentEmergencies.map((emergency) => (
-                <div key={emergency.id} className="table-row">
-                  <div className="table-cell">
-                    <div className="emergency-type">
-                      {emergency.type === 'Medical' && (
-                        <span className="type-icon">❤️</span>
-                      )}
-                      {emergency.type === 'Fire' && (
-                        <span className="type-icon">🔥</span>
-                      )}
-                      {emergency.type === 'Police' && (
-                        <span className="type-icon">👮</span>
-                      )}
-                      {emergency.type === 'Accident' && (
-                        <span className="type-icon">🚗</span>
-                      )}
-                      {emergency.type}
+              {emergenciesLoading ? (
+                <div className="table-loading">
+                  <div className="loading-spinner"></div>
+                  <p>Loading emergencies...</p>
+                </div>
+              ) : (
+                recentEmergencies.map((emergency) => (
+                  <div key={emergency.id} className="table-row">
+                    <div className="table-cell">
+                      <div className="emergency-type">
+                        <span className="type-icon">
+                          {getEmergencyTypeIcon(emergency.type)}
+                        </span>
+                        {emergency.type}
+                      </div>
+                    </div>
+                    <div className="table-cell">
+                      <div className="user-info">
+                        <span className="user-name">{emergency.user_name}</span>
+                        {emergency.user_phone && (
+                          <span className="user-phone">{emergency.user_phone}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="table-cell">
+                      <span className="location" title={emergency.location}>
+                        {emergency.location.length > 20 
+                          ? emergency.location.substring(0, 20) + '...' 
+                          : emergency.location}
+                      </span>
+                    </div>
+                    <div className="table-cell">
+                      <span className="time-info" title={new Date(emergency.created_at).toLocaleString()}>
+                        {emergency.time}
+                      </span>
+                    </div>
+                    <div className="table-cell">
+                      <span
+                        className={`status-badge ${getStatusColor(
+                          emergency.status
+                        )}`}
+                      >
+                        {emergency.status.charAt(0).toUpperCase() + emergency.status.slice(1)}
+                      </span>
+                    </div>
+                    <div className="table-cell">
+                      <span
+                        className={`priority-badge ${getPriorityColor(
+                          emergency.priority
+                        )}`}
+                      >
+                        {emergency.priority.charAt(0).toUpperCase() + emergency.priority.slice(1)}
+                      </span>
+                    </div>
+                    <div className="table-cell">
+                      <span className={`assigned-to ${emergency.handled_by === 'Unassigned' ? 'unassigned' : 'assigned'}`}>
+                        {emergency.handled_by}
+                      </span>
+                    </div>
+                    <div className="table-cell">
+                      <button 
+                        className="action-btn view-btn"
+                        onClick={() => handleEmergencyAction(emergency.id, 'view')}
+                        title="View emergency details"
+                      >
+                        View
+                      </button>
+                      <button 
+                        className="action-btn update-btn"
+                        onClick={() => handleEmergencyAction(emergency.id, 'update')}
+                        title="Update emergency status"
+                      >
+                        Update
+                      </button>
                     </div>
                   </div>
-                  <div className="table-cell">{emergency.user_name}</div>
-                  <div className="table-cell">{emergency.location}</div>
-                  <div className="table-cell">{emergency.time}</div>
-                  <div className="table-cell">
-                    <span
-                      className={`status-badge ${getStatusColor(
-                        emergency.status
-                      )}`}
-                    >
-                      {emergency.status}
-                    </span>
-                  </div>
-                  <div className="table-cell">
-                    <span
-                      className={`priority-badge ${getPriorityColor(
-                        emergency.priority
-                      )}`}
-                    >
-                      {emergency.priority}
-                    </span>
-                  </div>
-                  <div className="table-cell">
-                    <button className="action-btn view-btn">View</button>
-                    <button className="action-btn update-btn">Update</button>
-                  </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
 
-            {recentEmergencies.length === 0 && (
+            {!emergenciesLoading && recentEmergencies.length === 0 && (
               <div className="no-emergencies">
                 <span className="no-data-icon">📋</span>
                 <h4>No Recent Emergencies</h4>
@@ -362,7 +532,7 @@ function AdminDashboard() {
             )}
           </section>
 
-          {/* Quick Actions */}
+          {/* Quick Actions 
           <section className="admin-quick-actions">
             <h3>Quick Administrative Actions</h3>
             <div className="quick-actions-grid">
@@ -373,7 +543,7 @@ function AdminDashboard() {
               <button className="quick-action-btn">⚙️ System Settings</button>
               <button className="quick-action-btn">📈 Analytics</button>
             </div>
-          </section>
+          </section> */}
         </div>
       </main>
 

@@ -148,35 +148,295 @@ function authenticateAdmin(req, res, next) {
 // existing OTP, verify, login routes ...
 
 // 6️⃣ Chat route with Groq
+// In-memory storage for chat sessions
+const chatSessions = new Map()
+
+// Generate unique session ID
+function generateSessionId() {
+  return 'chat_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+}
+
+// Get or create chat session
+function getChatSession(sessionId) {
+  if (!chatSessions.has(sessionId)) {
+    chatSessions.set(sessionId, {
+      messages: [
+        {
+          role: 'system',
+          content: `You are an Emergency Response AI Assistant. You help with:
+- Emergency information and safety tips
+- First aid guidance
+- Connecting users with appropriate services
+- Mental health support
+- General emergency preparedness
+
+Always prioritize user safety. For life-threatening emergencies, remind users to call 911 immediately.
+Be empathetic, clear, and concise in your responses.`,
+        }
+      ],
+      createdAt: new Date(),
+      lastActivity: new Date()
+    })
+  }
+  return chatSessions.get(sessionId)
+}
+
+// Clean old sessions (run periodically)
+function cleanOldSessions() {
+  const now = new Date()
+  const HOUR_IN_MS = 60 * 60 * 1000
+  
+  for (const [sessionId, session] of chatSessions.entries()) {
+    if (now - session.lastActivity > HOUR_IN_MS) {
+      chatSessions.delete(sessionId)
+    }
+  }
+}
+
+// Clean sessions every 30 minutes
+setInterval(cleanOldSessions, 30 * 60 * 1000)
+
+// Enhanced chat endpoint
+// Enhanced chat endpoint with location integration
 app.post('/chat', async (req, res) => {
   try {
-    const { message } = req.body
+    const { message, sessionId } = req.body
+    const token = req.headers.authorization?.replace('Bearer ', '')
+    
     if (!message) {
       return res.status(400).json({ error: 'Message is required' })
     }
 
-    // Send to Groq
+    // Get or create session
+    let currentSessionId = sessionId
+    if (!currentSessionId) {
+      currentSessionId = generateSessionId()
+    }
+    
+    const session = getChatSession(currentSessionId)
+    
+    // Add user message to session
+    session.messages.push({ role: 'user', content: message })
+    session.lastActivity = new Date()
+    
+    // Keep only last 20 messages (10 back-and-forth) to manage token limits
+    if (session.messages.length > 21) { // +1 for system message
+      session.messages = [
+        session.messages[0], // Keep system message
+        ...session.messages.slice(-20) // Keep last 20 user/assistant messages
+      ]
+    }
+
+    // Check for location-related requests
+    const locationKeywords = [
+      'location', 'coordinates', 'where am i', 'my location', 'track me',
+      'store my location', 'update location', 'save location', 'gps',
+      'latitude', 'longitude', 'position', 'address'
+    ]
+    
+    const isLocationRequest = locationKeywords.some(keyword => 
+      message.toLowerCase().includes(keyword)
+    )
+
+    // Enhanced system message for location requests
+    let systemMessage = session.messages[0].content
+    if (isLocationRequest) {
+      systemMessage += `\n\nThe user is asking about location services. You can:
+1. Help them enable location tracking
+2. Guide them on sharing location with emergency contacts
+3. Explain how to save important locations
+4. Assist with location-based emergency features
+If they want to update their location, ask them to either:
+- Enable browser location to get current coordinates automatically
+- Provide specific coordinates (latitude, longitude)
+- Give you their current address for geocoding`
+    }
+
+    // Update system message temporarily for this request
+    const messagesForAPI = [
+      { role: 'system', content: systemMessage },
+      ...session.messages.slice(1)
+    ]
+
+    // Send conversation to Groq
     const completion = await groq.chat.completions.create({
-      messages: [
-        {
-          role: 'system',
-          content:
-            'You are a helpful assistant for emergencies and general queries.',
-        },
-        { role: 'user', content: message },
-      ],
-      model: 'llama-3.1-8b-instant', // fast and good for chat
+      messages: messagesForAPI,
+      model: 'llama-3.1-8b-instant',
+      max_tokens: 500,
+      temperature: 0.7
     })
 
-    const reply =
-      completion.choices[0]?.message?.content ||
+    let reply = completion.choices[0]?.message?.content || 
       'Sorry, I could not generate a response.'
 
-    res.json({ reply })
+    // If location request detected and user is authenticated
+    if (isLocationRequest && token) {
+      try {
+        // Verify user token
+        const decoded = jwt.verify(token, process.env.JWT_SECRET)
+        const userId = decoded.id
+
+        // Check if message contains coordinates
+        const coordinatePattern = /(-?\d+\.?\d*),\s*(-?\d+\.?\d*)/
+        const coordinateMatch = message.match(coordinatePattern)
+        
+        if (coordinateMatch) {
+          const [, latitude, longitude] = coordinateMatch
+          
+          // Store coordinates in user table
+          await supabase.from('users').update({ latitude, longitude, location_updated_at: new Date().toISOString() }).eq('id', userId)
+          
+          reply += '\n\n✅ Your location coordinates have been saved to your profile for emergency services.'
+        } else {
+          // Add instructions for location sharing
+          reply += `\n\n📍 To store your location:
+1. Go to the Location page to enable GPS tracking
+2. Share coordinates in format: "latitude, longitude" (e.g., "40.7128, -74.0060")
+3. Or provide your address for automatic geocoding`
+        }
+      } catch (authError) {
+        reply += '\n\n⚠️ Please log in to save location data to your profile.'
+      }
+    }
+
+    // Add AI response to session
+    session.messages.push({ role: 'assistant', content: reply })
+    
+    res.json({ 
+      reply,
+      sessionId: currentSessionId,
+      messageCount: session.messages.length - 1,
+      locationDetected: isLocationRequest
+    })
+
   } catch (err) {
-    console.error('Groq chat error:', err)
-    res.status(500).json({ error: 'Failed to get response from Groq' })
+    console.error('Chat error:', err)
+    res.status(500).json({ error: 'Failed to get response' })
   }
+})
+
+// New endpoint to store location from chat
+app.post('/chat/store-location', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.replace('Bearer ', '')
+    const { latitude, longitude, address } = req.body
+
+    if (!token) {
+      return res.status(401).json({ error: 'Authentication required' })
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET)
+    const userId = decoded.id
+
+    let lat = latitude
+    let lng = longitude
+
+    // If address provided but no coordinates, geocode it
+    if (address && (!lat || !lng)) {
+      try {
+        const geocodeResponse = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&countrycodes=IN&limit=1`
+        )
+        const geocodeData = await geocodeResponse.json()
+        
+        if (geocodeData && geocodeData.length > 0) {
+          lat = parseFloat(geocodeData[0].lat)
+          lng = parseFloat(geocodeData[0].lon)
+        } else {
+          return res.status(400).json({ error: 'Could not find coordinates for this address' })
+        }
+      } catch (geocodeError) {
+        return res.status(400).json({ error: 'Geocoding failed' })
+      }
+    }
+
+    if (!lat || !lng) {
+      return res.status(400).json({ error: 'Latitude and longitude are required' })
+    }
+
+    // Update user location
+    await supabase.from('users').update({ latitude, longitude, location_updated_at: new Date().toISOString() }).eq('id', userId)
+
+    res.json({
+      success: true,
+      message: 'Location stored successfully',
+      coordinates: { latitude: lat, longitude: lng }
+    })
+
+  } catch (error) {
+    console.error('Store location error:', error)
+    res.status(500).json({ error: 'Failed to store location' })
+  }
+})
+
+// Enhanced geocoding function for chat integration
+async function geocodeAddressForChat(address) {
+  const pincodeMatch = address.match(/(\d{6})/)
+  
+  if (pincodeMatch) {
+    const pincode = pincodeMatch[1]
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${pincode}&countrycodes=IN&limit=1`
+      )
+      const data = await response.json()
+      
+      if (data && data.length > 0) {
+        return {
+          latitude: parseFloat(data[0].lat),
+          longitude: parseFloat(data[0].lon)
+        }
+      }
+    } catch (error) {
+      console.log('Pincode geocoding failed, trying full address')
+    }
+  }
+  
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&countrycodes=IN&limit=1`
+    )
+    const data = await response.json()
+    
+    if (data && data.length > 0) {
+      return {
+        latitude: parseFloat(data[0].lat),
+        longitude: parseFloat(data[0].lon)
+      }
+    }
+  } catch (error) {
+    console.error('Full address geocoding failed:', error)
+  }
+  
+  throw new Error('Address not found')
+}
+
+// Optional: Get session info endpoint
+app.get('/chat/session/:sessionId', (req, res) => {
+  const { sessionId } = req.params
+  const session = chatSessions.get(sessionId)
+  
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found' })
+  }
+  
+  res.json({
+    sessionId,
+    messageCount: session.messages.length - 1,
+    createdAt: session.createdAt,
+    lastActivity: session.lastActivity
+  })
+})
+
+// Optional: Clear session endpoint
+app.delete('/chat/session/:sessionId', (req, res) => {
+  const { sessionId } = req.params
+  const deleted = chatSessions.delete(sessionId)
+  
+  res.json({ 
+    success: deleted,
+    message: deleted ? 'Session cleared' : 'Session not found'
+  })
 })
 
 // --------------------
@@ -303,7 +563,7 @@ app.post('/login', async (req, res) => {
     const token = jwt.sign(
       { user_id: user.id, email: user.email },
       process.env.JWT_SECRET,
-      { expiresIn: '7d' }
+      { expiresIn: '30d' }
     )
 
     res.json({
@@ -805,6 +1065,79 @@ app.get('/locations', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Internal server error' })
   }
 })
+
+// Add this route to your backend (e.g., in routes/emergency.js or app.js)
+
+// Add this route to your backend (e.g., in routes/emergency.js or app.js)
+
+// Add this route to your backend (e.g., in routes/emergency.js or app.js)
+
+app.post('/emergency/create', authenticateToken, async (req, res) => {
+  try {
+    const { type, location, priority = 'Critical' } = req.body;
+    const userId = req.user?.id || req.user?.user_id; // Try both possible fields from JWT token
+
+    console.log('JWT User object:', req.user); // Debug log
+    console.log('User ID extracted:', userId); // Debug log
+
+    // Validate required fields
+    if (!type || !location) {
+      return res.status(400).json({ 
+        error: 'Type and location are required' 
+      });
+    }
+
+    // Validate user ID
+    if (!userId) {
+      console.error('No user ID found in JWT token');
+      return res.status(401).json({ 
+        error: 'User ID not found in token' 
+      });
+    }
+
+    // Insert emergency into database using Supabase
+    const { data: emergency, error } = await supabase
+      .from('emergencies')
+      .insert([
+        {
+          user_id: userId,
+          type: type,
+          location: location,
+          priority: priority,
+          status: 'Reported'
+        }
+      ])
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Supabase error:', error);
+      return res.status(500).json({ 
+        error: 'Failed to create emergency report',
+        details: error.message 
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Emergency reported successfully',
+      emergency: {
+        id: emergency.id,
+        type: emergency.type,
+        location: emergency.location,
+        priority: emergency.priority,
+        status: emergency.status,
+        reported_time: emergency.reported_time
+      }
+    });
+
+  } catch (error) {
+    console.error('Error creating emergency:', error);
+    res.status(500).json({ 
+      error: 'Failed to create emergency report' 
+    });
+  }
+});
 
 // POST /locations - Add a new saved location
 app.post('/locations', authenticateToken, async (req, res) => {

@@ -1,16 +1,24 @@
-import React, { useState } from 'react'
+import React, { useState, useContext } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase } from '../supabaseClient' // <-- adjust path
+import { supabase } from '../supabaseClient'
 import './Login.css'
+
+// If you have a context for user state, import it here
+// import { AuthContext } from '../context/AuthContext'
+// import { UserContext } from '../context/UserContext'
 
 function Login() {
   const [formData, setFormData] = useState({
     email: '',
     password: '',
-    userType: 'user', // Default to user
+    userType: 'user',
     rememberMe: false,
   })
   const navigate = useNavigate()
+
+  // If you have context, uncomment these:
+  // const { setUser, setIsAuthenticated } = useContext(AuthContext)
+  // const { updateUserData } = useContext(UserContext)
 
   const [errors, setErrors] = useState({})
   const [isLoading, setIsLoading] = useState(false)
@@ -52,6 +60,32 @@ function Login() {
     return newErrors
   }
 
+  // Enhanced user data storage and state update
+  const updateApplicationState = (userData, userType, token) => {
+    try {
+      // Store in localStorage
+      localStorage.setItem('user', JSON.stringify(userData))
+      localStorage.setItem('token', token)
+      localStorage.setItem('userType', userType)
+      localStorage.setItem('isAuthenticated', 'true')
+
+      // If you have context providers, update them here:
+      // setUser(userData)
+      // setIsAuthenticated(true)
+      // updateUserData(userData)
+
+      // Trigger a custom event that other parts of your app can listen to
+      window.dispatchEvent(new CustomEvent('userLogin', {
+        detail: { user: userData, userType, token }
+      }))
+
+      // Force a small delay to ensure state propagation
+      return new Promise(resolve => setTimeout(resolve, 100))
+    } catch (error) {
+      console.error('Error updating application state:', error)
+    }
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
 
@@ -62,13 +96,15 @@ function Login() {
     }
 
     setIsLoading(true)
+    setErrors({})
 
     try {
-      // 🎯 Select endpoint based on user type
       const endpoint =
         formData.userType === 'admin'
-          ? 'http://localhost:8000/admin/login' // Admin login endpoint
-          : 'http://localhost:8000/login' // Regular user login endpoint
+          ? 'http://localhost:8000/admin/login'
+          : 'http://localhost:8000/login'
+
+      console.log(`🔄 Attempting ${formData.userType} login to:`, endpoint)
 
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -76,48 +112,59 @@ function Login() {
         body: JSON.stringify({
           email: formData.email,
           password: formData.password,
-          // Note: userType is only sent to regular login, admin/login doesn't need it
           ...(formData.userType === 'user' && { userType: formData.userType }),
         }),
       })
 
       const data = await response.json()
+      console.log('📄 Server response:', data)
 
       if (response.ok) {
-        // 🎯 Handle different response structures
         const isAdmin = formData.userType === 'admin'
         const userData = isAdmin ? data.admin : data.user
         const userType = isAdmin ? 'admin' : 'user'
 
-        alert(
-          `${isAdmin ? 'Admin' : 'User'} login successful! Welcome back${
-            userData.first_name ? `, ${userData.first_name}` : ''
-          }.`
-        )
+        console.log('✅ Login successful, user data:', userData)
 
-        // 🎯 Store user data with consistent structure
+        // Enhanced user data structure
         const userToStore = {
           ...userData,
           userType: userType,
-          // Add role for admin users
-          ...(isAdmin && { role: userData.role }),
+          isAuthenticated: true,
+          loginTime: new Date().toISOString(),
+          ...(isAdmin && { role: 'admin' }),
         }
 
-        localStorage.setItem('user', JSON.stringify(userToStore))
-        localStorage.setItem('token', data.token)
-        localStorage.setItem('userType', userType)
+        console.log('💾 Storing user data:', userToStore)
 
-        // 🎯 Navigate based on user type
+        // Update application state first
+        await updateApplicationState(userToStore, userType, data.token)
+
+        alert(
+          `${isAdmin ? 'Admin' : 'User'} login successful! Welcome back${
+            userData?.first_name ? `, ${userData.first_name}` : ''
+          }.`
+        )
+
+        console.log(`🧭 Navigating to ${isAdmin ? 'admin dashboard' : 'home'}...`)
+
+        // Use replace instead of navigate to prevent back button issues
         if (isAdmin) {
-          navigate('/admin-dashboard') // Navigate to admin dashboard
+          navigate('/admin-dashboard', { replace: true })
         } else {
-          navigate('/') // Navigate to user dashboard/home
+          navigate('/', { replace: true })
         }
+
+        // Alternative: Force a page reload after navigation (if other solutions don't work)
+        // setTimeout(() => {
+        //   window.location.reload()
+        // }, 100)
+
       } else {
-        // 🎯 Handle different error response structures
+        console.error('❌ Login failed:', data)
+        
         const errorMessage = data.error || data.message || 'Invalid credentials'
 
-        // Show more specific error messages for admin login
         if (formData.userType === 'admin') {
           if (errorMessage.includes('deactivated')) {
             setErrors({
@@ -137,7 +184,7 @@ function Login() {
         }
       }
     } catch (err) {
-      console.error('Login error:', err)
+      console.error('💥 Login error:', err)
       setErrors({
         general: `${
           formData.userType === 'admin' ? 'Admin l' : 'L'
@@ -162,8 +209,6 @@ function Login() {
       return
     }
 
-    // 🎯 Note: This is using Supabase auth for password reset
-    // For admin users, you might want to implement a separate admin password reset
     const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
       redirectTo: 'http://localhost:3000/reset-password',
     })
@@ -303,7 +348,6 @@ function Login() {
                     Remember me
                   </label>
 
-                  {/* Only show forgot password for regular users */}
                   {formData.userType === 'user' && (
                     <button
                       type="button"
@@ -314,7 +358,6 @@ function Login() {
                     </button>
                   )}
 
-                  {/* Show admin contact info instead */}
                   {formData.userType === 'admin' && (
                     <span className="admin-help-text">
                       Contact super admin for password reset
@@ -340,7 +383,6 @@ function Login() {
                 </button>
               </form>
 
-              {/* Only show register link for users */}
               {formData.userType === 'user' && (
                 <div className="register-link">
                   <p>
@@ -352,7 +394,6 @@ function Login() {
                 </div>
               )}
 
-              {/* Admin registration note */}
               {formData.userType === 'admin' && (
                 <div className="admin-register-note">
                   <p>
@@ -364,7 +405,6 @@ function Login() {
               )}
             </div>
 
-            {/* Quick Access - Only show for user type */}
             {formData.userType === 'user' && (
               <div className="quick-access">
                 <h3>Emergency Quick Access</h3>
@@ -401,7 +441,6 @@ function Login() {
               </div>
             )}
 
-            {/* Admin Info - Only show for admin type */}
             {formData.userType === 'admin' && (
               <div className="admin-info">
                 <h3>Admin Access</h3>
@@ -432,7 +471,6 @@ function Login() {
           </div>
         </div>
 
-        {/* Forgot Password Modal - Only for regular users */}
         {showForgotPassword && formData.userType === 'user' && (
           <div
             className="modal-overlay"

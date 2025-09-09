@@ -23,6 +23,93 @@ function HomePage() {
   try {
     const token = localStorage.getItem("token");
     if (token) {
+      // Get current location first
+      const getCurrentLocation = () => {
+        return new Promise((resolve, reject) => {
+          if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+              (position) => {
+                resolve({
+                  latitude: position.coords.latitude,
+                  longitude: position.coords.longitude
+                });
+              },
+              (error) => {
+                console.error("Location error:", error);
+                reject(error);
+              },
+              {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 60000
+              }
+            );
+          } else {
+            reject(new Error("Geolocation is not supported"));
+          }
+        });
+      };
+
+      let locationData = null;
+      let locationString = "Location unavailable";
+      
+      try {
+        // Try to get current location
+        locationData = await getCurrentLocation();
+        console.log("Current location obtained:", locationData);
+        locationString = `${locationData.latitude}, ${locationData.longitude}`;
+        
+        // Update user's location in the database
+        const locationResponse = await fetch("http://localhost:8000/update_location", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            latitude: locationData.latitude,
+            longitude: locationData.longitude,
+          }),
+        });
+
+        if (!locationResponse.ok) {
+          const locationError = await locationResponse.json();
+          console.error("Failed to update location:", locationError);
+          // Continue with emergency call even if location update fails
+        } else {
+          console.log("Location updated successfully");
+        }
+      } catch (locationError) {
+        console.error("Failed to get current location:", locationError);
+        // Continue with emergency call even if location fails
+      }
+
+      // Create emergency entry in database
+      try {
+        const emergencyResponse = await fetch("http://localhost:8000/emergency/create", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            type: "General Emergency", // You can customize this or make it dynamic
+            location: locationString,
+            priority: "Critical"
+          }),
+        });
+
+        const emergencyData = await emergencyResponse.json();
+        if (!emergencyResponse.ok) {
+          console.error("Failed to create emergency entry:", emergencyData);
+        } else {
+          console.log("Emergency entry created successfully:", emergencyData);
+        }
+      } catch (emergencyError) {
+        console.error("Error creating emergency entry:", emergencyError);
+      }
+
+      // Make the original emergency call
       await fetch("http://localhost:8000/emergency/call", {
         method: "POST",
         headers: {
@@ -36,6 +123,129 @@ function HomePage() {
   }
 
   setTimeout(() => setEmergencyActive(false), 3000);
+};
+
+const handleServiceEmergency = async (emergencyType) => {
+  setEmergencyActive(true);
+
+  try {
+    const token = localStorage.getItem("token");
+    if (token) {
+      // Get current location first
+      const getCurrentLocation = () => {
+        return new Promise((resolve, reject) => {
+          if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+              (position) => {
+                resolve({
+                  latitude: position.coords.latitude,
+                  longitude: position.coords.longitude
+                });
+              },
+              (error) => {
+                console.error("Location error:", error);
+                reject(error);
+              },
+              {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 60000
+              }
+            );
+          } else {
+            reject(new Error("Geolocation is not supported"));
+          }
+        });
+      };
+
+      let locationData = null;
+      let locationString = "Location unavailable";
+      
+      try {
+        // Try to get current location
+        locationData = await getCurrentLocation();
+        console.log("Current location obtained:", locationData);
+        locationString = `${locationData.latitude}, ${locationData.longitude}`;
+        
+        // Update user's location in the database
+        const locationResponse = await fetch("http://localhost:8000/update_location", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            latitude: locationData.latitude,
+            longitude: locationData.longitude,
+          }),
+        });
+
+        if (!locationResponse.ok) {
+          const locationError = await locationResponse.json();
+          console.error("Failed to update location:", locationError);
+        } else {
+          console.log("Location updated successfully");
+        }
+      } catch (locationError) {
+        console.error("Failed to get current location:", locationError);
+      }
+
+      // Create emergency entry in database
+      try {
+        const emergencyResponse = await fetch("http://localhost:8000/emergency/create", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            type: emergencyType,
+            location: locationString,
+            priority: "Critical"
+          }),
+        });
+
+        const emergencyData = await emergencyResponse.json();
+        if (!emergencyResponse.ok) {
+          console.error("Failed to create emergency entry:", emergencyData);
+        } else {
+          console.log(`${emergencyType} emergency entry created successfully:`, emergencyData);
+        }
+      } catch (emergencyError) {
+        console.error("Error creating emergency entry:", emergencyError);
+      }
+
+      // Make the emergency call
+      await fetch("http://localhost:8000/emergency/call", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+    }
+  } catch (err) {
+    console.error(`${emergencyType} emergency call failed:`, err);
+  }
+
+  setTimeout(() => setEmergencyActive(false), 3000);
+};
+
+// Individual handlers for each service type
+const handlePoliceEmergency = () => {
+  handleServiceEmergency("Police Emergency");
+};
+
+const handleMedicalEmergency = () => {
+  handleServiceEmergency("Medical Emergency");
+};
+
+const handleFireEmergency = () => {
+  handleServiceEmergency("Fire Emergency");
+};
+
+const handleAccidentEmergency = () => {
+  handleServiceEmergency("Accident Emergency");
 };
 
 
@@ -191,43 +401,52 @@ function HomePage() {
           </section>
 
           {/* Emergency Services */}
-          <section className="emergency-services">
-            <h3>Emergency Services</h3>
-            
-            <div className="services-grid">
-              {/* Police */}
-              <div className="service-card">
-                <div className="service-icon police-icon">🛡️</div>
-                <h4>Police</h4>
-                <p>Criminal activity, theft, violence, suspicious behavior</p>
-                <button className="service-btn police-btn">Need Police Assistance</button>
-              </div>
+          {/* Emergency Services */}
+<section className="emergency-services">
+  <h3>Emergency Services</h3>
+  
+  <div className="services-grid">
+    {/* Police */}
+    <div className="service-card">
+      <div className="service-icon police-icon">🛡️</div>
+      <h4>Police</h4>
+      <p>Criminal activity, theft, violence, suspicious behavior</p>
+      <button className="service-btn police-btn" onClick={handlePoliceEmergency}>
+        Need Police Assistance
+      </button>
+    </div>
 
-              {/* Medical */}
-              <div className="service-card">
-                <div className="service-icon medical-icon">❤️</div>
-                <h4>Medical</h4>
-                <p>Injuries, illness, cardiac events, breathing problems</p>
-                <button className="service-btn medical-btn">Need Medical Assistance</button>
-              </div>
+    {/* Medical */}
+    <div className="service-card">
+      <div className="service-icon medical-icon">❤️</div>
+      <h4>Medical</h4>
+      <p>Injuries, illness, cardiac events, breathing problems</p>
+      <button className="service-btn medical-btn" onClick={handleMedicalEmergency}>
+        Need Medical Assistance
+      </button>
+    </div>
 
-              {/* Fire */}
-              <div className="service-card">
-                <div className="service-icon fire-icon">🔥</div>
-                <h4>Fire</h4>
-                <p>Fire, smoke, gas leaks, hazardous materials</p>
-                <button className="service-btn fire-btn">Need Fire assistance</button>
-              </div>
+    {/* Fire */}
+    <div className="service-card">
+      <div className="service-icon fire-icon">🔥</div>
+      <h4>Fire</h4>
+      <p>Fire, smoke, gas leaks, hazardous materials</p>
+      <button className="service-btn fire-btn" onClick={handleFireEmergency}>
+        Need Fire Assistance
+      </button>
+    </div>
 
-              {/* Accident */}
-              <div className="service-card">
-                <div className="service-icon accident-icon">🚗</div>
-                <h4>Accident</h4>
-                <p>Vehicle accidents, collisions, traffic incidents</p>
-                <button className="service-btn accident-btn">Call Accident</button>
-              </div>
-            </div>
-          </section>
+    {/* Accident */}
+    <div className="service-card">
+      <div className="service-icon accident-icon">🚗</div>
+      <h4>Accident</h4>
+      <p>Vehicle accidents, collisions, traffic incidents</p>
+      <button className="service-btn accident-btn" onClick={handleAccidentEmergency}>
+        Call Accident
+      </button>
+    </div>
+  </div>
+</section>
 
           {/* Additional Services */}
           <section className="additional-services">
