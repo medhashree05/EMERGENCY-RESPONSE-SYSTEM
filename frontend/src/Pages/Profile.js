@@ -130,7 +130,7 @@ function Profile() {
             <button className="nav-link active">Profile</button>
             <button className="nav-link" onClick={() => navigate('/location')}>Location</button>
             <button className="nav-link" onClick={() => navigate('/dashboard')}>Dashboard</button>
-            <button className="nav-link" onClick={() => navigate('/settings')}>Settings</button>
+       
           </div>
         </div>
       </nav>

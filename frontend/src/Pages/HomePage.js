@@ -127,7 +127,7 @@ function HomePage() {
 
 const handleServiceEmergency = async (emergencyType) => {
   setEmergencyActive(true);
-
+  
   try {
     const token = localStorage.getItem("token");
     if (token) {
@@ -223,6 +223,73 @@ const handleServiceEmergency = async (emergencyType) => {
           Authorization: `Bearer ${token}`,
         },
       });
+
+      // 🆕 NEW FUNCTIONALITY: Send emergency-specific message to chat and navigate
+      try {
+        // Generate emergency-specific message based on type
+        const getEmergencyMessage = (type) => {
+          const messages = {
+            'Police': `🚨 POLICE EMERGENCY ALERT: I need immediate police assistance at my location (${locationString}). Please help me with police contact information, nearby stations, and what to do while waiting for help.`,
+            'Fire': `🔥 FIRE EMERGENCY ALERT: There is a fire emergency at my location (${locationString}). I need fire department contact information, nearby fire stations, and immediate fire safety guidance.`,
+            'Medical': `🚑 MEDICAL EMERGENCY ALERT: I have a medical emergency at my location (${locationString}). Please provide emergency medical guidance, nearby hospitals, ambulance services, and first aid instructions.`,
+            'Ambulance': `🚑 AMBULANCE EMERGENCY ALERT: I need an ambulance at my location (${locationString}). Please help with ambulance services, medical guidance, and what to do while waiting for medical help.`
+          };
+          return messages[type] || `🚨 EMERGENCY ALERT: I have a ${type} emergency at my location (${locationString}). Please provide immediate assistance and guidance.`;
+        };
+
+        const emergencyMessage = getEmergencyMessage(emergencyType);
+
+        // Send emergency message to chat endpoint
+        const chatResponse = await fetch("http://localhost:8000/chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            message: emergencyMessage,
+            sessionId: null // Start new emergency session
+          }),
+        });
+
+        const chatData = await chatResponse.json();
+        
+        if (chatResponse.ok) {
+          console.log("Emergency message sent to chat:", chatData);
+          
+          // Store the emergency session ID and response for chat page
+          localStorage.setItem('emergencySessionId', chatData.sessionId);
+          localStorage.setItem('emergencyResponse', JSON.stringify({
+            userMessage: emergencyMessage,
+            aiResponse: chatData.reply,
+            emergencyType: emergencyType,
+            location: locationString,
+            timestamp: new Date().toISOString()
+          }));
+          
+          // 🆕 Navigate to chat page after a short delay
+          setTimeout(() => {
+            // Assuming you're using React Router - replace with your navigation method
+            if (typeof navigate === 'function') {
+              navigate('/chat', { 
+                state: { 
+                  emergencyType, 
+                  location: locationString,
+                  sessionId: chatData.sessionId 
+                } 
+              });
+            } else {
+              // Fallback for direct window navigation
+              window.location.href = '/chat';
+            }
+          }, 2000); // 2 second delay to show emergency alert first
+          
+        } else {
+          console.error("Failed to send emergency message to chat:", chatData);
+        }
+      } catch (chatError) {
+        console.error("Error sending emergency message to chat:", chatError);
+      }
     }
   } catch (err) {
     console.error(`${emergencyType} emergency call failed:`, err);
@@ -372,7 +439,7 @@ const handleAccidentEmergency = () => {
             </button>
             <button className="nav-link" onClick={handleLocation}>Location</button>
             <button className="nav-link" onClick={handleDashboard}>Dashboard</button>
-            <button className="nav-link" onClick={handleSettings}>Settings</button>
+      
           </div>
         </div>
       </nav>

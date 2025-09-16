@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import './VoiceRecorder.css'
 import VoiceRecorder from './VoiceRecorder.js'
 import './ChatPage.css'
@@ -18,9 +18,10 @@ function ChatPage() {
   const [isEmergency, setIsEmergency] = useState(false)
   const [sessionId, setSessionId] = useState(null)
   const [messageCount, setMessageCount] = useState(0)
-  const [showLocationPrompt, setShowLocationPrompt] = useState(false) // 🆕 Location prompt
+  const [showLocationPrompt, setShowLocationPrompt] = useState(false)
   const messagesEndRef = useRef(null)
   const navigate = useNavigate()
+  const location = useLocation() // 🆕 Get location state for emergency data
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -30,27 +31,86 @@ function ChatPage() {
     scrollToBottom()
   }, [messages])
 
-  // Initialize or restore session
+  // 🆕 Enhanced initialization for emergency sessions
   useEffect(() => {
-    const savedSessionId = localStorage.getItem('chatSessionId')
-    if (savedSessionId) {
-      setSessionId(savedSessionId)
+    const initializeSession = () => {
+      // Check if navigated from emergency (via location state)
+      const emergencyState = location.state
+      
+      // Check for stored emergency response
+      const storedEmergencyResponse = localStorage.getItem('emergencyResponse')
+      const emergencySessionId = localStorage.getItem('emergencySessionId')
+      
+      if (emergencyState || (storedEmergencyResponse && emergencySessionId)) {
+        // Handle emergency session
+        const emergencyData = emergencyState || JSON.parse(storedEmergencyResponse)
+        
+        setSessionId(emergencySessionId)
+        setIsEmergency(true)
+        
+        // Add emergency messages to chat
+        const emergencyMessages = [
+          {
+            id: 1,
+            text: "🚨 EMERGENCY SESSION ACTIVATED - I'm here to help you with your emergency situation!",
+            sender: 'ai',
+            timestamp: new Date(),
+            isUrgent: true
+          }
+        ]
+        
+        if (storedEmergencyResponse) {
+          const data = JSON.parse(storedEmergencyResponse)
+          emergencyMessages.push(
+            {
+              id: 2,
+              text: data.userMessage,
+              sender: 'user',
+              timestamp: new Date(data.timestamp),
+              isUrgent: true
+            },
+            {
+              id: 3,
+              text: data.aiResponse,
+              sender: 'ai',
+              timestamp: new Date(),
+              isUrgent: true
+            }
+          )
+          
+          // Clear stored emergency data
+          localStorage.removeItem('emergencyResponse')
+          localStorage.removeItem('emergencySessionId')
+        }
+        
+        setMessages(emergencyMessages)
+        setMessageCount(emergencyMessages.length - 1)
+        
+      } else {
+        // Normal session initialization
+        const savedSessionId = localStorage.getItem('chatSessionId')
+        if (savedSessionId) {
+          setSessionId(savedSessionId)
+        }
+      }
     }
-  }, [])
+    
+    initializeSession()
+  }, [location.state])
 
-  // Save session ID when it changes
+  // Save session ID when it changes (existing functionality)
   useEffect(() => {
-    if (sessionId) {
+    if (sessionId && !localStorage.getItem('emergencySessionId')) {
       localStorage.setItem('chatSessionId', sessionId)
     }
   }, [sessionId])
 
   // 🆕 Get authentication token
   const getAuthToken = () => {
-    return localStorage.getItem('token') // Assuming you store JWT token here
+    return localStorage.getItem('token')
   }
 
-  // 🆕 Store location coordinates
+  // 🆕 Store location coordinates (existing functionality)
   const handleStoreLocation = async (latitude, longitude, address = null) => {
     const token = getAuthToken()
     
@@ -72,7 +132,6 @@ function ChatPage() {
       const data = await response.json()
       
       if (data.success) {
-        // Add success message to chat
         setMessages(prev => [...prev, {
           id: Date.now(),
           text: `✅ Location saved successfully! Coordinates: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
@@ -95,7 +154,7 @@ function ChatPage() {
     }
   }
 
-  // 🆕 Get current location using browser GPS
+  // 🆕 Get current location using browser GPS (existing functionality)
   const getCurrentLocation = () => {
     setShowLocationPrompt(false)
     
@@ -137,7 +196,7 @@ function ChatPage() {
       {
         enableHighAccuracy: true,
         timeout: 10000,
-        maximumAge: 300000 // 5 minutes
+        maximumAge: 300000
       }
     )
   }
@@ -158,10 +217,9 @@ function ChatPage() {
     setIsTyping(true)
 
     try {
-      const token = getAuthToken() // 🆕 Get auth token
+      const token = getAuthToken()
       const headers = { 'Content-Type': 'application/json' }
       
-      // 🆕 Add authorization header if token exists
       if (token) {
         headers['Authorization'] = `Bearer ${token}`
       }
@@ -196,20 +254,18 @@ function ChatPage() {
         },
       ])
 
-      // 🆕 Handle location detection
+      // Handle location detection (existing functionality)
       if (data.locationDetected) {
-        // Check if message contains coordinates pattern
         const coordinatePattern = /(-?\d+\.?\d*),\s*(-?\d+\.?\d*)/
         const coordinateMatch = messageText.match(coordinatePattern)
         
         if (!coordinateMatch && token) {
-          // Show location prompt for authenticated users
           setShowLocationPrompt(true)
         }
       }
 
       // Check for emergency keywords and set alert
-      const emergencyKeywords = ['emergency', 'help', 'urgent', 'pain', 'fire', 'accident', 'bleeding']
+      const emergencyKeywords = ['emergency', 'help', 'urgent', 'pain', 'fire', 'accident', 'bleeding', 'police', 'ambulance', 'medical']
       const hasEmergencyKeyword = emergencyKeywords.some(keyword => 
         messageText.toLowerCase().includes(keyword) || 
         aiResponse.toLowerCase().includes(keyword)
@@ -256,7 +312,8 @@ function ChatPage() {
     }])
     setSessionId(null)
     setMessageCount(0)
-    setShowLocationPrompt(false) // 🆕 Reset location prompt
+    setIsEmergency(false) // 🆕 Reset emergency state
+    setShowLocationPrompt(false)
     localStorage.removeItem('chatSessionId')
   }
 
@@ -271,6 +328,7 @@ function ChatPage() {
     window.location.href = 'tel:911'
   }
 
+  // 🆕 Enhanced quick responses for emergency scenarios
   const quickResponses = [
     'I need help with first aid',
     'How do I call emergency services?',
@@ -278,7 +336,10 @@ function ChatPage() {
     "There's a fire",
     'I need mental health support',
     "I'm lost and need location help",
-    'Store my current location', // 🆕 Added location quick response
+    'Store my current location',
+    'What should I do while waiting for help?', // 🆕 Emergency-specific
+    'Find nearest hospital', // 🆕 Emergency-specific
+    'Contact emergency services' // 🆕 Emergency-specific
   ]
 
   return (
@@ -292,7 +353,7 @@ function ChatPage() {
           <div className="chat-title">
             <h1>🤖 Emergency AI Assistant</h1>
             <span className="chat-status">
-              Online • {messageCount > 0 && `${messageCount} messages`}
+              {isEmergency ? '🚨 Emergency Mode' : 'Online'} • {messageCount > 0 && `${messageCount} messages`}
             </span>
           </div>
           <div className="header-actions">
@@ -318,7 +379,7 @@ function ChatPage() {
           <div className="emergency-alert-content">
             <span className="emergency-icon">🚨</span>
             <div className="emergency-text">
-              <strong>Emergency Detected</strong>
+              <strong>Emergency Mode Active</strong>
               <p>If this is a life-threatening emergency, call 911 immediately</p>
             </div>
             <button
@@ -331,7 +392,7 @@ function ChatPage() {
         </div>
       )}
 
-      {/* 🆕 Location Prompt */}
+      {/* Location Prompt (existing functionality) */}
       {showLocationPrompt && (
         <div className="location-prompt">
           <div className="location-prompt-content">

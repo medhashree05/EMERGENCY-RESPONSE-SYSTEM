@@ -175,7 +175,7 @@ export default function Dashboard() {
     <div className="dashboard">
       {/* HEADER */}
       <header className="header">
-        <div className="container header-content">
+        <div className="container user-header-content">
           <div className="logo-section">
             <div className="logo">
               <span className="shield-icon">🛡️</span>
@@ -208,10 +208,10 @@ export default function Dashboard() {
       </header>
 
       {/* NAVIGATION */}
-      <nav className="navigation">
+      <nav className="user-navigation">
         <div className="container nav-links">
           <button className="nav-link" onClick={handleEmergencyClick}>
-            Report Emergency
+            Emergency
           </button>
           <button className="nav-link" onClick={handleProfile}>
             Profile
@@ -220,9 +220,7 @@ export default function Dashboard() {
             Location
           </button>
           <button className="nav-link active">Dashboard</button>
-          <button className="nav-link" onClick={handleSettings}>
-            Settings
-          </button>
+          
         </div>
       </nav>
 

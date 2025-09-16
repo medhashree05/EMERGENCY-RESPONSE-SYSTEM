@@ -228,30 +228,30 @@ function AdminDashboard() {
   const getStatusColor = (status) => {
     switch (status.toLowerCase()) {
       case 'active':
-        return 'status-active'
+        return 'admin-status-active'
       case 'responding':
-        return 'status-responding'
+        return 'admin-status-responding'
       case 'resolved':
-        return 'status-resolved'
+        return 'admin-status-resolved'
       case 'pending':
-        return 'status-pending'
+        return 'admin-status-pending'
       default:
-        return 'status-default'
+        return 'admin-status-default'
     }
   }
 
   const getPriorityColor = (priority) => {
     switch (priority.toLowerCase()) {
       case 'critical':
-        return 'priority-critical'
+        return 'admin-priority-critical'
       case 'high':
-        return 'priority-high'
+        return 'admin-priority-high'
       case 'medium':
-        return 'priority-medium'
+        return 'admin-priority-medium'
       case 'low':
-        return 'priority-low'
+        return 'admin-priority-low'
       default:
-        return 'priority-default'
+        return 'admin-priority-default'
     }
   }
 
@@ -274,44 +274,44 @@ function AdminDashboard() {
 
   if (loading) {
     return (
-      <div className="admin-loading">
-        <div className="loading-spinner"></div>
+      <div className="admin-admin-loading">
+        <div className="admin-loading-spinner"></div>
         <p>Loading Admin Dashboard...</p>
       </div>
     )
   }
 
   return (
-    <div className="admin-dashboard">
+    <div className="admin-admin-dashboard">
       {/* Header - Same for all admin pages */}
-      <header className="admin-header">
-        <div className="admin-container">
-          <div className="header-content">
-            <div className="logo-section">
-              <div className="admin-logo">
-                <span className="admin-shield">🛡️</span>
+      <header className="admin-admin-header">
+        <div className="admin-admin-container">
+          <div className="admin-header-content">
+            <div className="admin-logo-section">
+              <div className="admin-admin-logo">
+                <span className="admin-admin-shield">🛡️</span>
               </div>
-              <div className="logo-text">
+              <div className="admin-logo-text">
                 <h1>Admin Control Panel</h1>
                 <p>Emergency Response Management</p>
               </div>
             </div>
-            <div className="header-info">
-              <div className="admin-info">
-                <span className="welcome-text">
+            <div className="admin-header-info">
+              <div className="admin-admin-info">
+                <span className="admin-welcome-text">
                   Welcome, {adminData?.first_name}
                 </span>
-                <span className="admin-badge">Administrator</span>
+                <span className="admin-admin-badge">Administrator</span>
               </div>
-              <div className="time-display">
-                <span className="time">{currentTime.toLocaleTimeString()}</span>
-                <span className="date">{currentTime.toLocaleDateString()}</span>
+              <div className="admin-time-display">
+                <span className="admin-time">{currentTime.toLocaleTimeString()}</span>
+                <span className="admin-date">{currentTime.toLocaleDateString()}</span>
               </div>
-              <div className="alert-indicator">
-                <span className="alert-count">
+              <div className="admin-alert-indicator">
+                <span className="admin-alert-count">
                   {systemStats.activeEmergencies}
                 </span>
-                <span className="alert-text">Active</span>
+                <span className="admin-alert-text">Active</span>
               </div>
             </div>
           </div>
@@ -319,17 +319,17 @@ function AdminDashboard() {
       </header>
 
       {/* Navigation */}
-      <nav className="admin-navigation">
-        <div className="admin-container">
-          <div className="nav-links">
-            <button className="nav-link active">Dashboard</button>
-            <button className="nav-link" onClick={handleProfile}>
+      <nav className="admin-admin-navigation">
+        <div className="admin-admin-container">
+          <div className="admin-nav-links">
+            <button className="admin-nav-link admin-active">Dashboard</button>
+            <button className="admin-nav-link" onClick={handleProfile}>
               Profile
             </button>
-            <button className="nav-link" onClick={handleSettings}>
+            <button className="admin-nav-link" onClick={handleSettings}>
               Settings
             </button>
-            <button className="nav-link logout-btn" onClick={handleLogout}>
+            <button className="admin-nav-link admin-logout-btn" onClick={handleLogout}>
               Logout
             </button>
           </div>
@@ -337,77 +337,77 @@ function AdminDashboard() {
       </nav>
 
       {/* Main Content */}
-      <main className="admin-main">
-        <div className="admin-container">
+      <main className="admin-admin-main">
+        <div className="admin-admin-container">
           {/* System Statistics */}
-          <section className="admin-stats-section">
+          <section className="admin-admin-stats-section">
             <h2>System Overview</h2>
-            <div className="admin-stats-grid">
-              <div className="admin-stat-card">
-                <div className="stat-icon users-icon">👥</div>
-                <div className="stat-content">
+            <div className="admin-admin-stats-grid">
+              <div className="admin-admin-stat-card">
+                <div className="admin-stat-icon admin-users-icon">👥</div>
+                <div className="admin-stat-content">
                   <h3>Total Users</h3>
-                  <div className="stat-number">{systemStats.totalUsers}</div>
-                  <p className="stat-change">Registered users</p>
+                  <div className="admin-stat-number">{systemStats.totalUsers}</div>
+                  <p className="admin-stat-change">Registered users</p>
                 </div>
               </div>
 
-              <div className="admin-stat-card">
-                <div className="stat-icon emergency-icon">🚨</div>
-                <div className="stat-content">
+              <div className="admin-admin-stat-card">
+                <div className="admin-stat-icon admin-emergency-icon">🚨</div>
+                <div className="admin-stat-content">
                   <h3>Active Emergencies</h3>
-                  <div className="stat-number">
+                  <div className="admin-stat-number">
                     {systemStats.activeEmergencies}
                   </div>
-                  <p className="stat-change urgent">Requires attention</p>
+                  <p className="admin-stat-change admin-urgent">Requires attention</p>
                 </div>
               </div>
 
-              <div className="admin-stat-card">
-                <div className="stat-icon calls-icon">📞</div>
-                <div className="stat-content">
+              <div className="admin-admin-stat-card">
+                <div className="admin-stat-icon admin-calls-icon">📞</div>
+                <div className="admin-stat-content">
                   <h3>Total Calls Today</h3>
-                  <div className="stat-number">{systemStats.totalCalls}</div>
-                  <p className="stat-change">Emergency calls</p>
+                  <div className="admin-stat-number">{systemStats.totalCalls}</div>
+                  <p className="admin-stat-change">Emergency calls</p>
                 </div>
               </div>
 
-              <div className="admin-stat-card">
-                <div className="stat-icon resolved-icon">✅</div>
-                <div className="stat-content">
+              <div className="admin-admin-stat-card">
+                <div className="admin-stat-icon admin-resolved-icon">✅</div>
+                <div className="admin-stat-content">
                   <h3>Resolved Today</h3>
-                  <div className="stat-number">{systemStats.resolvedToday}</div>
-                  <p className="stat-change positive">Successfully handled</p>
+                  <div className="admin-stat-number">{systemStats.resolvedToday}</div>
+                  <p className="admin-stat-change admin-positive">Successfully handled</p>
                 </div>
               </div>
             </div>
           </section>
 
           {/* Admin Performance */}
-          <section className="admin-performance">
-            <div className="section-header">
+          <section className="admin-admin-performance">
+            <div className="admin-section-header">
               <h3>Your Performance</h3>
-              <span className="performance-badge">Administrator</span>
+              <span className="admin-performance-badge">Administrator</span>
             </div>
-            <div className="performance-card">
-              <div className="performance-stats">
-                <div className="performance-item">
-                  <span className="performance-label">Calls Attended</span>
-                  <span className="performance-value">
+            <div className="admin-performance-card">
+              <div className="admin-performance-stats">
+                <div className="admin-performance-item">
+                  <span className="admin-performance-label">Calls Attended</span>
+                  <span className="admin-performance-value">
                     {adminData?.calls_attended || 0}
                   </span>
                 </div>
-                <div className="performance-item">
-                  <span className="performance-label">Last Login</span>
-                  <span className="performance-value">
+                <div className="admin-performance-item">
+                  <span className="admin-performance-label">Last Login</span>
+                  <span className="admin-performance-value">
                     {adminData?.last_login
                       ? new Date(adminData.last_login).toLocaleDateString()
                       : 'N/A'}
                   </span>
                 </div>
-                <div className="performance-item">
-                  <span className="performance-label">Account Status</span>
-                  <span className="performance-value active-status">
+                <div className="admin-performance-item">
+                  <span className="admin-performance-label">Account Status</span>
+                  <span className="admin-performance-value admin-active-status">
                     Active
                   </span>
                 </div>
@@ -416,13 +416,13 @@ function AdminDashboard() {
           </section>
 
           {/* Recent Emergencies */}
-          <section className="admin-emergencies-section">
-            <div className="section-header">
+          <section className="admin-admin-emergencies-section">
+            <div className="admin-section-header">
               <h3>Recent Emergency Reports</h3>
-              <div className="section-actions">
-                <span className="status-indicator">Live Updates</span>
+              <div className="admin-section-actions">
+                <span className="admin-status-indicator">Live Updates</span>
                 <button 
-                  className="refresh-btn" 
+                  className="admin-refresh-btn" 
                   onClick={refreshEmergencies}
                   disabled={emergenciesLoading}
                 >
@@ -431,87 +431,87 @@ function AdminDashboard() {
               </div>
             </div>
 
-            <div className="admin-emergencies-table">
-              <div className="table-header">
-                <div className="header-cell">Type</div>
-                <div className="header-cell">User</div>
-                <div className="header-cell">Location</div>
-                <div className="header-cell">Time</div>
-                <div className="header-cell">Status</div>
-                <div className="header-cell">Priority</div>
-                <div className="header-cell">Assigned To</div>
-                <div className="header-cell">Actions</div>
+            <div className="admin-admin-emergencies-table">
+              <div className="admin-table-header">
+                <div className="admin-header-cell">Type</div>
+                <div className="admin-header-cell">User</div>
+                <div className="admin-header-cell">Location</div>
+                <div className="admin-header-cell">Time</div>
+                <div className="admin-header-cell">Status</div>
+                <div className="admin-header-cell">Priority</div>
+                <div className="admin-header-cell">Assigned To</div>
+                <div className="admin-header-cell">Actions</div>
               </div>
 
               {emergenciesLoading ? (
-                <div className="table-loading">
-                  <div className="loading-spinner"></div>
+                <div className="admin-table-loading">
+                  <div className="admin-loading-spinner"></div>
                   <p>Loading emergencies...</p>
                 </div>
               ) : (
                 recentEmergencies.map((emergency) => (
-                  <div key={emergency.id} className="table-row">
-                    <div className="table-cell">
-                      <div className="emergency-type">
-                        <span className="type-icon">
+                  <div key={emergency.id} className="admin-table-row">
+                    <div className="admin-table-cell">
+                      <div className="admin-emergency-type">
+                        <span className="admin-type-icon">
                           {getEmergencyTypeIcon(emergency.type)}
                         </span>
                         {emergency.type}
                       </div>
                     </div>
-                    <div className="table-cell">
-                      <div className="user-info">
-                        <span className="user-name">{emergency.user_name}</span>
+                    <div className="admin-table-cell">
+                      <div className="admin-user-info">
+                        <span className="admin-user-name">{emergency.user_name}</span>
                         {emergency.user_phone && (
-                          <span className="user-phone">{emergency.user_phone}</span>
+                          <span className="admin-user-phone">{emergency.user_phone}</span>
                         )}
                       </div>
                     </div>
-                    <div className="table-cell">
-                      <span className="location" title={emergency.location}>
+                    <div className="admin-table-cell">
+                      <span className="admin-location" title={emergency.location}>
                         {emergency.location.length > 20 
                           ? emergency.location.substring(0, 20) + '...' 
                           : emergency.location}
                       </span>
                     </div>
-                    <div className="table-cell">
-                      <span className="time-info" title={new Date(emergency.created_at).toLocaleString()}>
+                    <div className="admin-table-cell">
+                      <span className="admin-time-info" title={new Date(emergency.created_at).toLocaleString()}>
                         {emergency.time}
                       </span>
                     </div>
-                    <div className="table-cell">
+                    <div className="admin-table-cell">
                       <span
-                        className={`status-badge ${getStatusColor(
+                        className={`admin-status-badge ${getStatusColor(
                           emergency.status
                         )}`}
                       >
                         {emergency.status.charAt(0).toUpperCase() + emergency.status.slice(1)}
                       </span>
                     </div>
-                    <div className="table-cell">
+                    <div className="admin-table-cell">
                       <span
-                        className={`priority-badge ${getPriorityColor(
+                        className={`admin-priority-badge ${getPriorityColor(
                           emergency.priority
                         )}`}
                       >
                         {emergency.priority.charAt(0).toUpperCase() + emergency.priority.slice(1)}
                       </span>
                     </div>
-                    <div className="table-cell">
-                      <span className={`assigned-to ${emergency.handled_by === 'Unassigned' ? 'unassigned' : 'assigned'}`}>
+                    <div className="admin-table-cell">
+                      <span className={`admin-assigned-to ${emergency.handled_by === 'Unassigned' ? 'admin-unassigned' : 'admin-assigned'}`}>
                         {emergency.handled_by}
                       </span>
                     </div>
-                    <div className="table-cell">
+                    <div className="admin-table-cell">
                       <button 
-                        className="action-btn view-btn"
+                        className="admin-action-btn admin-view-btn"
                         onClick={() => handleEmergencyAction(emergency.id, 'view')}
                         title="View emergency details"
                       >
                         View
                       </button>
                       <button 
-                        className="action-btn update-btn"
+                        className="admin-action-btn admin-update-btn"
                         onClick={() => handleEmergencyAction(emergency.id, 'update')}
                         title="Update emergency status"
                       >
@@ -524,8 +524,8 @@ function AdminDashboard() {
             </div>
 
             {!emergenciesLoading && recentEmergencies.length === 0 && (
-              <div className="no-emergencies">
-                <span className="no-data-icon">📋</span>
+              <div className="admin-no-emergencies">
+                <span className="admin-no-data-icon">📋</span>
                 <h4>No Recent Emergencies</h4>
                 <p>All emergency reports will appear here</p>
               </div>
@@ -533,29 +533,29 @@ function AdminDashboard() {
           </section>
 
           {/* Quick Actions 
-          <section className="admin-quick-actions">
+          <section className="admin-admin-quick-actions">
             <h3>Quick Administrative Actions</h3>
-            <div className="quick-actions-grid">
-              <button className="quick-action-btn">📊 System Reports</button>
-              <button className="quick-action-btn">🚨 Broadcast Alert</button>
-              <button className="quick-action-btn">👥 User Management</button>
-              <button className="quick-action-btn">📞 Call History</button>
-              <button className="quick-action-btn">⚙️ System Settings</button>
-              <button className="quick-action-btn">📈 Analytics</button>
+            <div className="admin-quick-actions-grid">
+              <button className="admin-quick-action-btn">📊 System Reports</button>
+              <button className="admin-quick-action-btn">🚨 Broadcast Alert</button>
+              <button className="admin-quick-action-btn">👥 User Management</button>
+              <button className="admin-quick-action-btn">📞 Call History</button>
+              <button className="admin-quick-action-btn">⚙️ System Settings</button>
+              <button className="admin-quick-action-btn">📈 Analytics</button>
             </div>
           </section> */}
         </div>
       </main>
 
       {/* Footer */}
-      <footer className="admin-footer">
-        <div className="container">
-          <div className="footer-content">
+      <footer className="admin-admin-footer">
+        <div className="admin-container">
+          <div className="admin-footer-content">
             <p>
               © {new Date().getFullYear()} Emergency Response Admin Panel |
               System Status: Online
             </p>
-            <p className="footer-subtitle">
+            <p className="admin-footer-subtitle">
               Admin: {adminData?.email_address} | Last Updated:{' '}
               {currentTime.toLocaleString()}
             </p>

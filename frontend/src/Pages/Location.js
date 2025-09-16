@@ -514,7 +514,7 @@ function Location() {
             <button className="nav-link" onClick={() => navigate('/profile')}>Profile</button>
             <button className="nav-link active">Location</button>
             <button className="nav-link" onClick={() => navigate('/dashboard')}>Dashboard</button>
-            <button className="nav-link" onClick={() => navigate('/settings')}>Settings</button>
+        
           </div>
         </div>
       </nav>
