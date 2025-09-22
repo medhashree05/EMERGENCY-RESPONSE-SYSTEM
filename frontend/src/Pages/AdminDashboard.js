@@ -17,7 +17,15 @@ function AdminDashboard() {
   const [loading, setLoading] = useState(true)
   const [emergenciesLoading, setEmergenciesLoading] = useState(false)
   const [acceptingEmergency, setAcceptingEmergency] = useState(null)
+  const [updatingEmergency, setUpdatingEmergency] = useState(null)
   const [showAvailableCases, setShowAvailableCases] = useState(false)
+  const [selectedEmergency, setSelectedEmergency] = useState(null)
+  const [showUpdateModal, setShowUpdateModal] = useState(false)
+  const [updateData, setUpdateData] = useState({
+    status: '',
+    resolution_notes: '',
+    priority: '',
+  })
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -93,7 +101,7 @@ function AdminDashboard() {
       const { count: activeEmergencies, error: activeError } = await supabase
         .from('emergencies')
         .select('*', { count: 'exact', head: true })
-        .in('status', ['Reported', 'responding', 'pending'])
+        .in('status', ['Reported', 'Accepted', 'responding', 'pending'])
 
       if (activeError) {
         console.error('Error fetching active emergencies:', activeError)
@@ -104,17 +112,18 @@ function AdminDashboard() {
       const { count: totalCalls, error: callsError } = await supabase
         .from('emergencies')
         .select('*', { count: 'exact', head: true })
-        .gte('created_at', today.toISOString())
+        .gte('reported_time', today.toISOString())
 
       if (callsError) {
         console.error("Error fetching today's calls:", callsError)
       }
 
+      // Use resolved_at for counting resolved emergencies today
       const { count: resolvedToday, error: resolvedError } = await supabase
         .from('emergencies')
         .select('*', { count: 'exact', head: true })
         .eq('status', 'resolved')
-        .gte('updated_at', today.toISOString())
+        .gte('resolved_at', today.toISOString())
 
       if (resolvedError) {
         console.error('Error fetching resolved emergencies:', resolvedError)
@@ -139,16 +148,17 @@ function AdminDashboard() {
         .from('emergencies')
         .select(
           `
-          *,
-          users (
-            first_name,
-            last_name,
-            phone_number
-          )
-        `
+        *,
+        users (
+          first_name,
+          last_name,
+          phone_number
         )
+      `
+        )
+        .in('status', ['Resolved'])
         .order('reported_time', { ascending: false })
-        .limit(10)
+        .limit(15) // Increased limit to show more resolved cases
 
       if (error) {
         console.error('Error fetching emergencies:', error)
@@ -164,11 +174,14 @@ function AdminDashboard() {
             : 'Unknown User',
           user_phone: emergency.users?.phone_number || 'N/A',
           location: emergency.location || 'Unknown Location',
-          time: formatTimeAgo(emergency.created_at),
+          time: formatTimeAgo(emergency.reported_time),
           status: emergency.status || 'Unknown',
           priority: emergency.priority || 'Medium',
           handled_by: emergency.handled_by || 'Unassigned',
-          created_at: emergency.created_at,
+          reported_time: emergency.reported_time,
+          accepted_at: emergency.accepted_at,
+          resolved_at: emergency.resolved_at,
+          resolution_notes: emergency.resolution_notes,
           rawData: emergency,
         })) || []
 
@@ -204,7 +217,7 @@ function AdminDashboard() {
         )
         .eq('status', 'Reported')
         .is('handled_by', null)
-        .order('created_at', { ascending: true })
+        .order('reported_time', { ascending: true })
         .limit(10)
 
       if (error) {
@@ -224,7 +237,7 @@ function AdminDashboard() {
             }
 
             // If same priority, sort by time (oldest first)
-            return new Date(a.created_at) - new Date(b.created_at)
+            return new Date(a.reported_time) - new Date(b.reported_time)
           })
           .slice(0, 5) || []
 
@@ -236,9 +249,9 @@ function AdminDashboard() {
           : 'Unknown User',
         user_phone: emergency.users?.phone_number || 'N/A',
         location: emergency.location || 'Unknown Location',
-        time: formatTimeAgo(emergency.created_at),
+        time: formatTimeAgo(emergency.reported_time),
         priority: emergency.priority || 'Medium',
-        created_at: emergency.created_at,
+        reported_time: emergency.reported_time,
         rawData: emergency,
       }))
 
@@ -347,14 +360,92 @@ function AdminDashboard() {
   const handleEmergencyAction = async (emergencyId, action) => {
     try {
       if (action === 'view') {
-        console.log('Viewing emergency:', emergencyId)
-        // Implement detailed view
+        const emergency = recentEmergencies.find((e) => e.id === emergencyId)
+        setSelectedEmergency(emergency)
+        // You can implement a detailed view modal here
+        alert(`Viewing emergency details for case #${emergencyId}`)
       } else if (action === 'update') {
-        console.log('Updating emergency:', emergencyId)
-        // Implement status update
+        const emergency = recentEmergencies.find((e) => e.id === emergencyId)
+        setSelectedEmergency(emergency)
+        setUpdateData({
+          status: emergency.status,
+          resolution_notes: emergency.resolution_notes || '',
+          priority: emergency.priority,
+        })
+        setShowUpdateModal(true)
       }
     } catch (error) {
       console.error('Error handling emergency action:', error)
+    }
+  }
+
+  const handleUpdateEmergency = async () => {
+    if (!selectedEmergency || !adminData?.id) {
+      alert('Unable to update emergency. Please try again.')
+      return
+    }
+
+    setUpdatingEmergency(selectedEmergency.id)
+
+    try {
+      const updatePayload = {
+        status: updateData.status,
+        priority: updateData.priority,
+      }
+
+      // If resolving, add resolution timestamp and notes
+      if (updateData.status === 'resolved') {
+        updatePayload.resolved_at = new Date().toISOString()
+        updatePayload.resolution_notes = updateData.resolution_notes
+        updatePayload.resolved_by = `${adminData.first_name} ${adminData.last_name}`
+      }
+
+      // If status is changing from 'Reported' to something else and not handled yet
+      if (
+        selectedEmergency.status === 'Reported' &&
+        !selectedEmergency.handled_by
+      ) {
+        updatePayload.handled_by = `${adminData.first_name} ${adminData.last_name}`
+        updatePayload.admin_id = adminData.id
+        updatePayload.accepted_at = new Date().toISOString()
+
+        // Update admin's calls_attended count
+        await supabase
+          .from('admin')
+          .update({
+            calls_attended: (adminData.calls_attended || 0) + 1,
+          })
+          .eq('id', adminData.id)
+      }
+
+      const { error: updateError } = await supabase
+        .from('emergencies')
+        .update(updatePayload)
+        .eq('id', selectedEmergency.id)
+
+      if (updateError) {
+        throw new Error('Failed to update emergency')
+      }
+
+      alert('Emergency updated successfully!')
+      setShowUpdateModal(false)
+      setSelectedEmergency(null)
+      setUpdateData({
+        status: '',
+        resolution_notes: '',
+        priority: '',
+      })
+
+      // Refresh all data
+      loadRecentEmergencies()
+      loadAvailableEmergencies()
+      loadSystemStats()
+      loadAdminData()
+    } catch (error) {
+      console.error('Error updating emergency:', error)
+      alert('Failed to update emergency. Please try again.')
+    } finally {
+      setUpdatingEmergency(null)
     }
   }
 
@@ -768,7 +859,9 @@ function AdminDashboard() {
                     <div className="admin-table-cell">
                       <span
                         className="admin-time-info"
-                        title={new Date(emergency.created_at).toLocaleString()}
+                        title={new Date(
+                          emergency.reported_time
+                        ).toLocaleString()}
                       >
                         {emergency.time}
                       </span>
@@ -822,8 +915,11 @@ function AdminDashboard() {
                               handleEmergencyAction(emergency.id, 'update')
                             }
                             title="Update emergency status"
+                            disabled={updatingEmergency === emergency.id}
                           >
-                            Update
+                            {updatingEmergency === emergency.id
+                              ? 'Updating...'
+                              : 'Update'}
                           </button>
                         </>
                       ) : (
@@ -847,6 +943,137 @@ function AdminDashboard() {
           </section>
         </div>
       </main>
+
+      {/* Update Emergency Modal */}
+      {showUpdateModal && selectedEmergency && (
+        <div className="admin-modal-overlay">
+          <div className="admin-modal">
+            <div className="admin-modal-header">
+              <h3>Update Emergency Case #{selectedEmergency.id}</h3>
+              <button
+                className="admin-modal-close"
+                onClick={() => setShowUpdateModal(false)}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="admin-modal-content">
+              <div className="admin-emergency-summary">
+                <div className="admin-summary-item">
+                  <strong>Type:</strong> {selectedEmergency.type}
+                </div>
+                <div className="admin-summary-item">
+                  <strong>Reporter:</strong> {selectedEmergency.user_name}
+                </div>
+                <div className="admin-summary-item">
+                  <strong>Location:</strong> {selectedEmergency.location}
+                </div>
+                <div className="admin-summary-item">
+                  <strong>Reported:</strong>{' '}
+                  {new Date(selectedEmergency.reported_time).toLocaleString()}
+                </div>
+                {selectedEmergency.accepted_at && (
+                  <div className="admin-summary-item">
+                    <strong>Accepted:</strong>{' '}
+                    {new Date(selectedEmergency.accepted_at).toLocaleString()}
+                  </div>
+                )}
+                {selectedEmergency.resolved_at && (
+                  <div className="admin-summary-item">
+                    <strong>Resolved:</strong>{' '}
+                    {new Date(selectedEmergency.resolved_at).toLocaleString()}
+                  </div>
+                )}
+              </div>
+
+              <div className="admin-update-form">
+                <div className="admin-form-group">
+                  <label htmlFor="status">Status:</label>
+                  <select
+                    id="status"
+                    value={updateData.status}
+                    onChange={(e) =>
+                      setUpdateData({ ...updateData, status: e.target.value })
+                    }
+                    className="admin-form-select"
+                  >
+                    <option value="Reported">Reported</option>
+                    <option value="Accepted">Accepted</option>
+                    <option value="responding">Responding</option>
+                    <option value="pending">Pending</option>
+                    <option value="resolved">Resolved</option>
+                  </select>
+                </div>
+
+                <div className="admin-form-group">
+                  <label htmlFor="priority">Priority:</label>
+                  <select
+                    id="priority"
+                    value={updateData.priority}
+                    onChange={(e) =>
+                      setUpdateData({ ...updateData, priority: e.target.value })
+                    }
+                    className="admin-form-select"
+                  >
+                    <option value="Low">Low</option>
+                    <option value="Medium">Medium</option>
+                    <option value="High">High</option>
+                    <option value="Critical">Critical</option>
+                  </select>
+                </div>
+
+                {updateData.status === 'resolved' && (
+                  <div className="admin-form-group">
+                    <label htmlFor="resolution_notes">Resolution Notes:</label>
+                    <textarea
+                      id="resolution_notes"
+                      value={updateData.resolution_notes}
+                      onChange={(e) =>
+                        setUpdateData({
+                          ...updateData,
+                          resolution_notes: e.target.value,
+                        })
+                      }
+                      className="admin-form-textarea"
+                      placeholder="Enter resolution details..."
+                      rows="4"
+                    />
+                  </div>
+                )}
+
+                {selectedEmergency.resolution_notes && (
+                  <div className="admin-form-group">
+                    <label>Previous Resolution Notes:</label>
+                    <div className="admin-previous-notes">
+                      {selectedEmergency.resolution_notes}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="admin-modal-actions">
+              <button
+                className="admin-modal-btn admin-cancel-btn"
+                onClick={() => setShowUpdateModal(false)}
+                disabled={updatingEmergency === selectedEmergency.id}
+              >
+                Cancel
+              </button>
+              <button
+                className="admin-modal-btn admin-save-btn"
+                onClick={handleUpdateEmergency}
+                disabled={updatingEmergency === selectedEmergency.id}
+              >
+                {updatingEmergency === selectedEmergency.id
+                  ? 'Updating...'
+                  : 'Update Emergency'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <footer className="admin-admin-footer">
