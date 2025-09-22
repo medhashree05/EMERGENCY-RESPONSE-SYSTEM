@@ -12,7 +12,7 @@
 .admin-admin-container {
   max-width: 100%;
   margin: 0 auto;
-  padding: 0 200px;  /* reduce side gap */
+  padding: 0 200px; /* reduce side gap */
 }
 
 /* Loading State */
@@ -290,13 +290,6 @@
   flex-shrink: 0;
 }
 
-.admin-users-icon,
-.admin-emergency-icon,
-.admin-calls-icon,
-.admin-resolved-icon {
-  /* Icon-specific styles can be added here if needed */
-}
-
 .admin-stat-content {
   flex: 1;
 }
@@ -456,10 +449,6 @@
   text-transform: uppercase;
   color: #cbd5e1;
   gap: 1rem;
-}
-
-.admin-header-cell {
-  /* Header cell styles */
 }
 
 .admin-table-row {
@@ -911,5 +900,262 @@
   .admin-status-badge,
   .admin-priority-badge {
     border-width: 2px;
+  }
+}
+/* Available Cases Section - Add this to your AdminDashboard.css */
+
+.admin-admin-available-cases-section {
+  margin-bottom: 3rem;
+}
+
+.admin-available-count {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  padding: 0.25rem 0.75rem;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  text-transform: uppercase;
+}
+
+.admin-toggle-cases-btn {
+  background: rgba(249, 115, 22, 0.2);
+  color: #fb923c;
+  border: 1px solid rgba(249, 115, 22, 0.3);
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.admin-toggle-cases-btn:hover {
+  background: rgba(249, 115, 22, 0.3);
+  color: #fdba74;
+}
+
+.admin-available-cases-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1.5rem;
+  margin-top: 1rem;
+}
+
+.admin-available-case-card {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  transition: all 0.3s ease;
+}
+
+.admin-available-case-card:hover {
+  background: rgba(255, 255, 255, 0.15);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+}
+
+.admin-case-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.admin-case-type {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.admin-case-icon {
+  font-size: 1.25rem;
+}
+
+.admin-case-type-text {
+  font-weight: 600;
+  color: white;
+  font-size: 0.875rem;
+}
+
+.admin-case-priority {
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.admin-case-details {
+  margin-bottom: 1.5rem;
+}
+
+.admin-case-detail {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 0.75rem;
+  gap: 1rem;
+}
+
+.admin-case-detail:last-child {
+  margin-bottom: 0;
+}
+
+.admin-detail-label {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+  min-width: 70px;
+}
+
+.admin-detail-value {
+  font-size: 0.875rem;
+  color: white;
+  font-weight: 500;
+  text-align: right;
+  flex: 1;
+  word-wrap: break-word;
+}
+
+.admin-case-actions {
+  display: flex;
+  justify-content: center;
+}
+
+.admin-accept-case-btn {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  width: 100%;
+}
+
+.admin-accept-case-btn:hover {
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(239, 68, 68, 0.4);
+}
+
+.admin-accept-case-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.admin-accept-case-btn.admin-accepting {
+  background: linear-gradient(135deg, #6b7280, #4b5563);
+  box-shadow: 0 4px 15px rgba(107, 114, 128, 0.3);
+}
+
+.admin-no-available-cases {
+  text-align: center;
+  padding: 3rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.admin-no-available-cases h4 {
+  font-size: 1.25rem;
+  font-weight: bold;
+  margin-bottom: 0.5rem;
+  color: #4ade80;
+}
+
+.admin-no-available-cases p {
+  color: #64748b;
+  font-size: 0.875rem;
+}
+
+/* Additional status colors for Available Cases */
+.admin-status-accepted {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.admin-status-reported {
+  background: rgba(251, 191, 36, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+/* New Case Indicator */
+.admin-new-case-indicator {
+  background: rgba(251, 191, 36, 0.2);
+  color: #fbbf24;
+  padding: 0.25rem 0.75rem;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  text-transform: uppercase;
+}
+
+/* Responsive adjustments for Available Cases */
+@media (max-width: 768px) {
+  .admin-available-cases-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-available-case-card {
+    padding: 1rem;
+  }
+
+  .admin-case-detail {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .admin-detail-label {
+    min-width: auto;
+  }
+
+  .admin-detail-value {
+    text-align: left;
+  }
+
+  .admin-section-actions {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .admin-toggle-cases-btn {
+    width: 100%;
+    text-align: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .admin-case-header {
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: flex-start;
+  }
+
+  .admin-accept-case-btn {
+    padding: 0.625rem 1.25rem;
+    font-size: 0.75rem;
+  }
+
+  .admin-available-case-card {
+    padding: 0.75rem;
   }
 }

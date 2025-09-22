@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase } from '../supabaseClient' 
+import { supabase } from '../supabaseClient'
 import './AdminDashboard.css'
 
 function AdminDashboard() {
@@ -13,8 +13,11 @@ function AdminDashboard() {
     resolvedToday: 0,
   })
   const [recentEmergencies, setRecentEmergencies] = useState([])
+  const [availableEmergencies, setAvailableEmergencies] = useState([])
   const [loading, setLoading] = useState(true)
   const [emergenciesLoading, setEmergenciesLoading] = useState(false)
+  const [acceptingEmergency, setAcceptingEmergency] = useState(null)
+  const [showAvailableCases, setShowAvailableCases] = useState(false)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -25,16 +28,20 @@ function AdminDashboard() {
     loadAdminData()
     loadSystemStats()
     loadRecentEmergencies()
+    loadAvailableEmergencies()
 
     // Set up real-time subscription for emergencies
     const emergenciesSubscription = supabase
       .channel('emergencies_changes')
-      .on('postgres_changes', 
-          { event: '*', schema: 'public', table: 'emergencies' },
-          (payload) => {
-            console.log('Emergency data changed:', payload)
-            loadRecentEmergencies() // Reload emergencies when data changes
-          }
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'emergencies' },
+        (payload) => {
+          console.log('Emergency data changed:', payload)
+          loadRecentEmergencies()
+          loadAvailableEmergencies()
+          loadSystemStats()
+        }
       )
       .subscribe()
 
@@ -45,34 +52,36 @@ function AdminDashboard() {
   }, [])
 
   const loadAdminData = async () => {
-  try {
-    const token = localStorage.getItem('adminToken') || localStorage.getItem('token')
-    if (!token) {
-      navigate('/login')
-      return
+    try {
+      const token =
+        localStorage.getItem('adminToken') || localStorage.getItem('token')
+      if (!token) {
+        navigate('/login')
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('admin')
+        .select(
+          'id, first_name, last_name, email_address, last_login, calls_attended'
+        )
+        .single()
+
+      if (error) {
+        console.error('Error fetching admin:', error)
+        return
+      }
+
+      setAdminData(data)
+    } catch (error) {
+      console.error('Error loading admin data:', error)
+    } finally {
+      setLoading(false)
     }
-
-    // ✅ Fetch the logged-in admin from Supabase
-    const { data, error } = await supabase
-      .from('admin') // your admin table
-      .select('id, first_name, last_name, email_address, last_login, calls_attended')
-      .single() // get one row (assuming 1 admin logged in)
-
-    if (error) {
-      console.error('Error fetching admin:', error)
-      return
-    }
-
-    setAdminData(data)
-  } catch (error) {
-    console.error('Error loading admin data:', error)
-  } finally {
-    setLoading(false)
   }
-}
+
   const loadSystemStats = async () => {
     try {
-      // Get total users count
       const { count: totalUsers, error: usersError } = await supabase
         .from('users')
         .select('*', { count: 'exact', head: true })
@@ -81,7 +90,6 @@ function AdminDashboard() {
         console.error('Error fetching users count:', usersError)
       }
 
-      // Get active emergencies count (assuming status 'active', 'responding', etc. are considered active)
       const { count: activeEmergencies, error: activeError } = await supabase
         .from('emergencies')
         .select('*', { count: 'exact', head: true })
@@ -91,7 +99,6 @@ function AdminDashboard() {
         console.error('Error fetching active emergencies:', activeError)
       }
 
-      // Get total calls today
       const today = new Date()
       today.setHours(0, 0, 0, 0)
       const { count: totalCalls, error: callsError } = await supabase
@@ -100,10 +107,9 @@ function AdminDashboard() {
         .gte('created_at', today.toISOString())
 
       if (callsError) {
-        console.error('Error fetching today\'s calls:', callsError)
+        console.error("Error fetching today's calls:", callsError)
       }
 
-      // Get resolved today count
       const { count: resolvedToday, error: resolvedError } = await supabase
         .from('emergencies')
         .select('*', { count: 'exact', head: true })
@@ -122,45 +128,49 @@ function AdminDashboard() {
       })
     } catch (error) {
       console.error('Error loading system stats:', error)
-      // Keep default values on error
     }
   }
 
   const loadRecentEmergencies = async () => {
     try {
       setEmergenciesLoading(true)
-      
+
       const { data: emergencies, error } = await supabase
         .from('emergencies')
-        .select(`
+        .select(
+          `
           *,
           users (
             first_name,
-            last_name
+            last_name,
+            phone_number
           )
-        `)
+        `
+        )
         .order('reported_time', { ascending: false })
-        .limit(10) // Get latest 10 emergencies
+        .limit(10)
 
       if (error) {
         console.error('Error fetching emergencies:', error)
         return
       }
 
-      // Format the data to match your component's expected structure
-      const formattedEmergencies = emergencies?.map(emergency => ({
-        id: emergency.id,
-        type: emergency.emergency_type || 'Unknown',
-        user_name: emergency.users 
-          ? `${emergency.users.first_name} ${emergency.users.last_name}` 
-          : 'Unknown User',
-        location: emergency.location || 'Unknown Location',
-        time: formatTimeAgo(emergency.created_at),
-        status: emergency.status || 'Unknown',
-        priority: emergency.priority || 'Medium',
-        // Include raw data for potential future use
-        rawData: emergency
-      })) || []
+      const formattedEmergencies =
+        emergencies?.map((emergency) => ({
+          id: emergency.id,
+          type: emergency.type || emergency.emergency_type || 'Unknown',
+          user_name: emergency.users
+            ? `${emergency.users.first_name} ${emergency.users.last_name}`
+            : 'Unknown User',
+          user_phone: emergency.users?.phone_number || 'N/A',
+          location: emergency.location || 'Unknown Location',
+          time: formatTimeAgo(emergency.created_at),
+          status: emergency.status || 'Unknown',
+          priority: emergency.priority || 'Medium',
+          handled_by: emergency.handled_by || 'Unassigned',
+          created_at: emergency.created_at,
+          rawData: emergency,
+        })) || []
 
       setRecentEmergencies(formattedEmergencies)
     } catch (error) {
@@ -170,7 +180,74 @@ function AdminDashboard() {
     }
   }
 
-  // Helper function to format time ago
+  const loadAvailableEmergencies = async () => {
+    try {
+      // Priority order: Critical, High, Medium, Low
+      const priorityOrder = {
+        Critical: 4,
+        High: 3,
+        Medium: 2,
+        Low: 1,
+      }
+
+      const { data: emergencies, error } = await supabase
+        .from('emergencies')
+        .select(
+          `
+          *,
+          users (
+            first_name,
+            last_name,
+            phone_number
+          )
+        `
+        )
+        .eq('status', 'Reported')
+        .is('handled_by', null)
+        .order('created_at', { ascending: true })
+        .limit(10)
+
+      if (error) {
+        console.error('Error fetching available emergencies:', error)
+        return
+      }
+
+      // Sort by priority (Critical first) and then by time
+      const sortedEmergencies =
+        emergencies
+          ?.sort((a, b) => {
+            const priorityA = priorityOrder[a.priority] || 0
+            const priorityB = priorityOrder[b.priority] || 0
+
+            if (priorityA !== priorityB) {
+              return priorityB - priorityA // Higher priority first
+            }
+
+            // If same priority, sort by time (oldest first)
+            return new Date(a.created_at) - new Date(b.created_at)
+          })
+          .slice(0, 5) || []
+
+      const formattedEmergencies = sortedEmergencies.map((emergency) => ({
+        id: emergency.id,
+        type: emergency.type || emergency.emergency_type || 'Unknown',
+        user_name: emergency.users
+          ? `${emergency.users.first_name} ${emergency.users.last_name}`
+          : 'Unknown User',
+        user_phone: emergency.users?.phone_number || 'N/A',
+        location: emergency.location || 'Unknown Location',
+        time: formatTimeAgo(emergency.created_at),
+        priority: emergency.priority || 'Medium',
+        created_at: emergency.created_at,
+        rawData: emergency,
+      }))
+
+      setAvailableEmergencies(formattedEmergencies)
+    } catch (error) {
+      console.error('Error loading available emergencies:', error)
+    }
+  }
+
   const formatTimeAgo = (timestamp) => {
     const now = new Date()
     const emergencyTime = new Date(timestamp)
@@ -178,35 +255,113 @@ function AdminDashboard() {
 
     if (diffInMinutes < 1) return 'Just now'
     if (diffInMinutes < 60) return `${diffInMinutes} mins ago`
-    
+
     const diffInHours = Math.floor(diffInMinutes / 60)
     if (diffInHours < 24) return `${diffInHours} hours ago`
-    
+
     const diffInDays = Math.floor(diffInHours / 24)
     return `${diffInDays} days ago`
   }
 
-  // Function to handle emergency actions
+  const handleAcceptEmergency = async (emergencyId) => {
+    if (!adminData?.id) {
+      alert('Admin data not loaded. Please refresh and try again.')
+      return
+    }
+
+    setAcceptingEmergency(emergencyId)
+
+    try {
+      // Use a transaction-like approach to prevent race conditions
+      const { data: currentEmergency, error: fetchError } = await supabase
+        .from('emergencies')
+        .select('status, handled_by')
+        .eq('id', emergencyId)
+        .single()
+
+      if (fetchError) {
+        throw new Error('Failed to fetch current emergency status')
+      }
+
+      // Check if already accepted by someone else
+      if (
+        currentEmergency.status !== 'Reported' ||
+        currentEmergency.handled_by !== null
+      ) {
+        alert('This emergency has already been accepted by another admin.')
+        loadAvailableEmergencies()
+        loadRecentEmergencies()
+        return
+      }
+
+      // Attempt to update the emergency
+      const { data: updatedEmergency, error: updateError } = await supabase
+        .from('emergencies')
+        .update({
+          status: 'Accepted',
+          handled_by: `${adminData.first_name} ${adminData.last_name}`,
+          admin_id: adminData.id,
+          accepted_at: new Date().toISOString(),
+        })
+        .eq('id', emergencyId)
+        .eq('status', 'Reported') // Only update if still in 'Reported' status
+        .is('handled_by', null) // Only update if not handled by anyone
+        .select()
+
+      if (updateError) {
+        throw new Error('Failed to accept emergency')
+      }
+
+      if (!updatedEmergency || updatedEmergency.length === 0) {
+        alert(
+          'This emergency was just accepted by another admin. Please try another case.'
+        )
+        loadAvailableEmergencies()
+        loadRecentEmergencies()
+        return
+      }
+
+      // Update admin's calls_attended count
+      await supabase
+        .from('admin')
+        .update({
+          calls_attended: (adminData.calls_attended || 0) + 1,
+        })
+        .eq('id', adminData.id)
+
+      alert('Emergency case accepted successfully!')
+
+      // Refresh all data
+      loadAvailableEmergencies()
+      loadRecentEmergencies()
+      loadSystemStats()
+      loadAdminData()
+    } catch (error) {
+      console.error('Error accepting emergency:', error)
+      alert('Failed to accept emergency. Please try again.')
+    } finally {
+      setAcceptingEmergency(null)
+    }
+  }
+
   const handleEmergencyAction = async (emergencyId, action) => {
     try {
       if (action === 'view') {
-        // Navigate to emergency details or open modal
         console.log('Viewing emergency:', emergencyId)
-        // You can implement a detailed view here
+        // Implement detailed view
       } else if (action === 'update') {
-        // You can implement status update functionality
         console.log('Updating emergency:', emergencyId)
-        // Example: Open a modal to update status
+        // Implement status update
       }
     } catch (error) {
       console.error('Error handling emergency action:', error)
     }
   }
 
-  // Function to refresh emergencies manually
   const refreshEmergencies = () => {
     loadRecentEmergencies()
-    loadSystemStats() // Also refresh stats
+    loadAvailableEmergencies()
+    loadSystemStats()
   }
 
   const handleProfile = () => {
@@ -229,12 +384,16 @@ function AdminDashboard() {
     switch (status.toLowerCase()) {
       case 'active':
         return 'admin-status-active'
+      case 'accepted':
+        return 'admin-status-accepted'
       case 'responding':
         return 'admin-status-responding'
       case 'resolved':
         return 'admin-status-resolved'
       case 'pending':
         return 'admin-status-pending'
+      case 'reported':
+        return 'admin-status-reported'
       default:
         return 'admin-status-default'
     }
@@ -304,8 +463,12 @@ function AdminDashboard() {
                 <span className="admin-admin-badge">Administrator</span>
               </div>
               <div className="admin-time-display">
-                <span className="admin-time">{currentTime.toLocaleTimeString()}</span>
-                <span className="admin-date">{currentTime.toLocaleDateString()}</span>
+                <span className="admin-time">
+                  {currentTime.toLocaleTimeString()}
+                </span>
+                <span className="admin-date">
+                  {currentTime.toLocaleDateString()}
+                </span>
               </div>
               <div className="admin-alert-indicator">
                 <span className="admin-alert-count">
@@ -329,7 +492,10 @@ function AdminDashboard() {
             <button className="admin-nav-link" onClick={handleSettings}>
               Settings
             </button>
-            <button className="admin-nav-link admin-logout-btn" onClick={handleLogout}>
+            <button
+              className="admin-nav-link admin-logout-btn"
+              onClick={handleLogout}
+            >
               Logout
             </button>
           </div>
@@ -347,7 +513,9 @@ function AdminDashboard() {
                 <div className="admin-stat-icon admin-users-icon">👥</div>
                 <div className="admin-stat-content">
                   <h3>Total Users</h3>
-                  <div className="admin-stat-number">{systemStats.totalUsers}</div>
+                  <div className="admin-stat-number">
+                    {systemStats.totalUsers}
+                  </div>
                   <p className="admin-stat-change">Registered users</p>
                 </div>
               </div>
@@ -359,7 +527,9 @@ function AdminDashboard() {
                   <div className="admin-stat-number">
                     {systemStats.activeEmergencies}
                   </div>
-                  <p className="admin-stat-change admin-urgent">Requires attention</p>
+                  <p className="admin-stat-change admin-urgent">
+                    Requires attention
+                  </p>
                 </div>
               </div>
 
@@ -367,7 +537,9 @@ function AdminDashboard() {
                 <div className="admin-stat-icon admin-calls-icon">📞</div>
                 <div className="admin-stat-content">
                   <h3>Total Calls Today</h3>
-                  <div className="admin-stat-number">{systemStats.totalCalls}</div>
+                  <div className="admin-stat-number">
+                    {systemStats.totalCalls}
+                  </div>
                   <p className="admin-stat-change">Emergency calls</p>
                 </div>
               </div>
@@ -376,8 +548,12 @@ function AdminDashboard() {
                 <div className="admin-stat-icon admin-resolved-icon">✅</div>
                 <div className="admin-stat-content">
                   <h3>Resolved Today</h3>
-                  <div className="admin-stat-number">{systemStats.resolvedToday}</div>
-                  <p className="admin-stat-change admin-positive">Successfully handled</p>
+                  <div className="admin-stat-number">
+                    {systemStats.resolvedToday}
+                  </div>
+                  <p className="admin-stat-change admin-positive">
+                    Successfully handled
+                  </p>
                 </div>
               </div>
             </div>
@@ -392,7 +568,9 @@ function AdminDashboard() {
             <div className="admin-performance-card">
               <div className="admin-performance-stats">
                 <div className="admin-performance-item">
-                  <span className="admin-performance-label">Calls Attended</span>
+                  <span className="admin-performance-label">
+                    Calls Attended
+                  </span>
                   <span className="admin-performance-value">
                     {adminData?.calls_attended || 0}
                   </span>
@@ -406,7 +584,9 @@ function AdminDashboard() {
                   </span>
                 </div>
                 <div className="admin-performance-item">
-                  <span className="admin-performance-label">Account Status</span>
+                  <span className="admin-performance-label">
+                    Account Status
+                  </span>
                   <span className="admin-performance-value admin-active-status">
                     Active
                   </span>
@@ -415,14 +595,117 @@ function AdminDashboard() {
             </div>
           </section>
 
+          {/* Available Cases to Accept */}
+          <section className="admin-admin-available-cases-section">
+            <div className="admin-section-header">
+              <h3>New Cases Requiring Response</h3>
+              <div className="admin-section-actions">
+                <span className="admin-available-count">
+                  {availableEmergencies.length} Available
+                </span>
+                <button
+                  className="admin-toggle-cases-btn"
+                  onClick={() => setShowAvailableCases(!showAvailableCases)}
+                >
+                  {showAvailableCases ? 'Hide Cases' : 'Show Available Cases'}
+                </button>
+              </div>
+            </div>
+
+            {showAvailableCases && (
+              <div className="admin-available-cases-grid">
+                {availableEmergencies.length === 0 ? (
+                  <div className="admin-no-available-cases">
+                    <span className="admin-no-data-icon">✅</span>
+                    <h4>No Cases Awaiting Response</h4>
+                    <p>All emergency reports have been addressed</p>
+                  </div>
+                ) : (
+                  availableEmergencies.map((emergency) => (
+                    <div
+                      key={emergency.id}
+                      className="admin-available-case-card"
+                    >
+                      <div className="admin-case-header">
+                        <div className="admin-case-type">
+                          <span className="admin-case-icon">
+                            {getEmergencyTypeIcon(emergency.type)}
+                          </span>
+                          <span className="admin-case-type-text">
+                            {emergency.type}
+                          </span>
+                        </div>
+                        <span
+                          className={`admin-case-priority ${getPriorityColor(
+                            emergency.priority
+                          )}`}
+                        >
+                          {emergency.priority}
+                        </span>
+                      </div>
+
+                      <div className="admin-case-details">
+                        <div className="admin-case-detail">
+                          <span className="admin-detail-label">Reporter:</span>
+                          <span className="admin-detail-value">
+                            {emergency.user_name}
+                          </span>
+                        </div>
+                        <div className="admin-case-detail">
+                          <span className="admin-detail-label">Phone:</span>
+                          <span className="admin-detail-value">
+                            {emergency.user_phone}
+                          </span>
+                        </div>
+                        <div className="admin-case-detail">
+                          <span className="admin-detail-label">Location:</span>
+                          <span
+                            className="admin-detail-value"
+                            title={emergency.location}
+                          >
+                            {emergency.location.length > 30
+                              ? emergency.location.substring(0, 30) + '...'
+                              : emergency.location}
+                          </span>
+                        </div>
+                        <div className="admin-case-detail">
+                          <span className="admin-detail-label">Reported:</span>
+                          <span className="admin-detail-value">
+                            {emergency.time}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="admin-case-actions">
+                        <button
+                          className={`admin-accept-case-btn ${
+                            acceptingEmergency === emergency.id
+                              ? 'admin-accepting'
+                              : ''
+                          }`}
+                          onClick={() => handleAcceptEmergency(emergency.id)}
+                          disabled={acceptingEmergency === emergency.id}
+                        >
+                          {acceptingEmergency === emergency.id
+                            ? 'Accepting...'
+                            : 'Accept Case'}
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </section>
+
           {/* Recent Emergencies */}
           <section className="admin-admin-emergencies-section">
             <div className="admin-section-header">
               <h3>Recent Emergency Reports</h3>
               <div className="admin-section-actions">
                 <span className="admin-status-indicator">Live Updates</span>
-                <button 
-                  className="admin-refresh-btn" 
+                <button
+                  className="admin-refresh-btn"
                   onClick={refreshEmergencies}
                   disabled={emergenciesLoading}
                 >
@@ -461,21 +744,32 @@ function AdminDashboard() {
                     </div>
                     <div className="admin-table-cell">
                       <div className="admin-user-info">
-                        <span className="admin-user-name">{emergency.user_name}</span>
-                        {emergency.user_phone && (
-                          <span className="admin-user-phone">{emergency.user_phone}</span>
-                        )}
+                        <span className="admin-user-name">
+                          {emergency.user_name}
+                        </span>
+                        {emergency.user_phone &&
+                          emergency.user_phone !== 'N/A' && (
+                            <span className="admin-user-phone">
+                              {emergency.user_phone}
+                            </span>
+                          )}
                       </div>
                     </div>
                     <div className="admin-table-cell">
-                      <span className="admin-location" title={emergency.location}>
-                        {emergency.location.length > 20 
-                          ? emergency.location.substring(0, 20) + '...' 
+                      <span
+                        className="admin-location"
+                        title={emergency.location}
+                      >
+                        {emergency.location.length > 20
+                          ? emergency.location.substring(0, 20) + '...'
                           : emergency.location}
                       </span>
                     </div>
                     <div className="admin-table-cell">
-                      <span className="admin-time-info" title={new Date(emergency.created_at).toLocaleString()}>
+                      <span
+                        className="admin-time-info"
+                        title={new Date(emergency.created_at).toLocaleString()}
+                      >
                         {emergency.time}
                       </span>
                     </div>
@@ -485,7 +779,8 @@ function AdminDashboard() {
                           emergency.status
                         )}`}
                       >
-                        {emergency.status.charAt(0).toUpperCase() + emergency.status.slice(1)}
+                        {emergency.status.charAt(0).toUpperCase() +
+                          emergency.status.slice(1)}
                       </span>
                     </div>
                     <div className="admin-table-cell">
@@ -494,29 +789,48 @@ function AdminDashboard() {
                           emergency.priority
                         )}`}
                       >
-                        {emergency.priority.charAt(0).toUpperCase() + emergency.priority.slice(1)}
+                        {emergency.priority.charAt(0).toUpperCase() +
+                          emergency.priority.slice(1)}
                       </span>
                     </div>
                     <div className="admin-table-cell">
-                      <span className={`admin-assigned-to ${emergency.handled_by === 'Unassigned' ? 'admin-unassigned' : 'admin-assigned'}`}>
+                      <span
+                        className={`admin-assigned-to ${
+                          emergency.handled_by === 'Unassigned'
+                            ? 'admin-unassigned'
+                            : 'admin-assigned'
+                        }`}
+                      >
                         {emergency.handled_by}
                       </span>
                     </div>
                     <div className="admin-table-cell">
-                      <button 
-                        className="admin-action-btn admin-view-btn"
-                        onClick={() => handleEmergencyAction(emergency.id, 'view')}
-                        title="View emergency details"
-                      >
-                        View
-                      </button>
-                      <button 
-                        className="admin-action-btn admin-update-btn"
-                        onClick={() => handleEmergencyAction(emergency.id, 'update')}
-                        title="Update emergency status"
-                      >
-                        Update
-                      </button>
+                      {emergency.status !== 'Reported' ? (
+                        <>
+                          <button
+                            className="admin-action-btn admin-view-btn"
+                            onClick={() =>
+                              handleEmergencyAction(emergency.id, 'view')
+                            }
+                            title="View emergency details"
+                          >
+                            View
+                          </button>
+                          <button
+                            className="admin-action-btn admin-update-btn"
+                            onClick={() =>
+                              handleEmergencyAction(emergency.id, 'update')
+                            }
+                            title="Update emergency status"
+                          >
+                            Update
+                          </button>
+                        </>
+                      ) : (
+                        <span className="admin-new-case-indicator">
+                          New Case
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))
@@ -531,19 +845,6 @@ function AdminDashboard() {
               </div>
             )}
           </section>
-
-          {/* Quick Actions 
-          <section className="admin-admin-quick-actions">
-            <h3>Quick Administrative Actions</h3>
-            <div className="admin-quick-actions-grid">
-              <button className="admin-quick-action-btn">📊 System Reports</button>
-              <button className="admin-quick-action-btn">🚨 Broadcast Alert</button>
-              <button className="admin-quick-action-btn">👥 User Management</button>
-              <button className="admin-quick-action-btn">📞 Call History</button>
-              <button className="admin-quick-action-btn">⚙️ System Settings</button>
-              <button className="admin-quick-action-btn">📈 Analytics</button>
-            </div>
-          </section> */}
         </div>
       </main>
 
