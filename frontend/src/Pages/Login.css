@@ -61,11 +61,12 @@
 }
 
 .login-main {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 3rem;
-  align-items: start;
+  display: flex;
+  justify-content: center; /* centers horizontally */
+  align-items: center;     /* centers vertically */
+  min-height: calc(100vh - 120px); /* optional: full page center minus header */
 }
+
 
 /* Login Card */
 .login-card {

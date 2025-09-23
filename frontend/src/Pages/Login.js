@@ -405,7 +405,7 @@ function Login() {
               )}
             </div>
 
-            {formData.userType === 'user' && (
+            {/*{formData.userType === 'user' && (
               <div className="quick-access">
                 <h3>Emergency Quick Access</h3>
                 <p>
@@ -439,9 +439,9 @@ function Login() {
                   </button>
                 </div>
               </div>
-            )}
+            )}*/}
 
-            {formData.userType === 'admin' && (
+          {/* {formData.userType === 'admin' && (
               <div className="admin-info">
                 <h3>Admin Access</h3>
                 <p>
@@ -467,7 +467,7 @@ function Login() {
                   </div>
                 </div>
               </div>
-            )}
+            )}*/}
           </div>
         </div>
 

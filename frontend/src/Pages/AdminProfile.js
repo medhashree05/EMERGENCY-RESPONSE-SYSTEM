@@ -386,7 +386,7 @@ function AdminProfile() {
               </div>
             </div>
             <div className="header-info">
-              <div className="admin-info">
+              <div className="admin-admin-info">
                 <span className="welcome-text">
                   Welcome, {adminData?.first_name}
                 </span>
@@ -413,7 +413,7 @@ function AdminProfile() {
           <div className="nav-links">
             <button className="nav-link" onClick={handleDashboard}>Dashboard</button>
             <button className="nav-link" onClick={handleProfile}>Profile</button>
-            <button className="nav-link" onClick={handleSettings}>Settings</button>
+            
             <button className="nav-link logout-btn" onClick={handleLogout}>Logout</button>
           </div>
         </div>

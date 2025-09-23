@@ -21,6 +21,16 @@ function AdminDashboard() {
   const [showAvailableCases, setShowAvailableCases] = useState(false)
   const [selectedEmergency, setSelectedEmergency] = useState(null)
   const [showUpdateModal, setShowUpdateModal] = useState(false)
+  const [showViewModal, setShowViewModal] = useState(false)
+const [viewEmergency, setViewEmergency] = useState(null)
+const [showDispatchModal, setShowDispatchModal] = useState(false)
+const [nearbyServices, setNearbyServices] = useState([])
+const [loadingServices, setLoadingServices] = useState(false)
+const [dispatchingService, setDispatchingService] = useState(null)
+const [servicesByType, setServicesByType] = useState({})
+const [selectedServices, setSelectedServices] = useState([])
+const [requiredServiceTypes, setRequiredServiceTypes] = useState([])
+const [dispatchingMultiple, setDispatchingMultiple] = useState(false)
   const [updateData, setUpdateData] = useState({
     status: '',
     resolution_notes: '',
@@ -152,11 +162,11 @@ function AdminDashboard() {
         users (
           first_name,
           last_name,
-          phone_number
+          phone
         )
       `
         )
-        .in('status', ['Resolved'])
+        .in('status', ['Accepted', 'responding', 'pending', 'resolved'])
         .order('reported_time', { ascending: false })
         .limit(15) // Increased limit to show more resolved cases
 
@@ -172,7 +182,7 @@ function AdminDashboard() {
           user_name: emergency.users
             ? `${emergency.users.first_name} ${emergency.users.last_name}`
             : 'Unknown User',
-          user_phone: emergency.users?.phone_number || 'N/A',
+          user_phone: emergency.users?.phone || 'N/A',
           location: emergency.location || 'Unknown Location',
           time: formatTimeAgo(emergency.reported_time),
           status: emergency.status || 'Unknown',
@@ -211,7 +221,7 @@ function AdminDashboard() {
           users (
             first_name,
             last_name,
-            phone_number
+            phone
           )
         `
         )
@@ -277,107 +287,536 @@ function AdminDashboard() {
   }
 
   const handleAcceptEmergency = async (emergencyId) => {
-    if (!adminData?.id) {
-      alert('Admin data not loaded. Please refresh and try again.')
+  console.log('🟡 Starting handleAcceptEmergency with ID:', emergencyId)
+  console.log('👤 Admin data:', adminData)
+  console.log('🔍 Admin ID:', adminData?.id)
+
+  if (!adminData?.id) {
+    console.error('❌ Admin data not loaded')
+    alert('Admin data not loaded. Please refresh and try again.')
+    return
+  }
+
+  setAcceptingEmergency(emergencyId)
+  console.log('⏳ Set accepting emergency state for ID:', emergencyId)
+
+  try {
+    console.log('📋 Step 1: Fetching current emergency status...')
+    
+    // Use a transaction-like approach to prevent race conditions
+    const { data: currentEmergency, error: fetchError } = await supabase
+      .from('emergencies')
+      .select('status, handled_by')
+      .eq('id', emergencyId)
+      .single()
+
+    console.log('📄 Fetch result - Data:', currentEmergency)
+    console.log('📄 Fetch result - Error:', fetchError)
+
+    if (fetchError) {
+      console.error('❌ Failed to fetch emergency:', fetchError)
+      throw new Error('Failed to fetch current emergency status: ' + fetchError.message)
+    }
+
+    console.log('✅ Current emergency status:', currentEmergency.status)
+    console.log('✅ Current handled_by:', currentEmergency.handled_by)
+
+    // Check if already accepted by someone else
+    if (
+      currentEmergency.status !== 'Reported' ||
+      currentEmergency.handled_by !== null
+    ) {
+      console.warn('⚠️ Emergency already accepted - Status:', currentEmergency.status, 'Handled by:', currentEmergency.handled_by)
+      alert('This emergency has already been accepted by another admin.')
+      loadAvailableEmergencies()
+      loadRecentEmergencies()
       return
     }
 
-    setAcceptingEmergency(emergencyId)
+    console.log('🔄 Step 2: Attempting to update emergency...')
+    
+    const updatePayload = {
+      status: 'Accepted',
+      handled_by: `${adminData.first_name} ${adminData.last_name}`,
+      admin_id: adminData.id,
+      accepted_at: new Date().toISOString(),
+    }
+    
+    console.log('📦 Update payload:', updatePayload)
 
-    try {
-      // Use a transaction-like approach to prevent race conditions
-      const { data: currentEmergency, error: fetchError } = await supabase
-        .from('emergencies')
-        .select('status, handled_by')
-        .eq('id', emergencyId)
-        .single()
+    // Attempt to update the emergency
+    const { data: updatedEmergency, error: updateError } = await supabase
+      .from('emergencies')
+      .update(updatePayload)
+      .eq('id', emergencyId)
+      .eq('status', 'Reported') // Only update if still in 'Reported' status
+      .is('handled_by', null) // Only update if not handled by anyone
+      .select()
 
-      if (fetchError) {
-        throw new Error('Failed to fetch current emergency status')
-      }
+    console.log('📊 Update result - Data:', updatedEmergency)
+    console.log('📊 Update result - Error:', updateError)
 
-      // Check if already accepted by someone else
-      if (
-        currentEmergency.status !== 'Reported' ||
-        currentEmergency.handled_by !== null
-      ) {
-        alert('This emergency has already been accepted by another admin.')
-        loadAvailableEmergencies()
-        loadRecentEmergencies()
-        return
-      }
+    if (updateError) {
+      console.error('❌ Update failed with error:', updateError)
+      console.error('📝 Error details:', JSON.stringify(updateError, null, 2))
+      throw new Error('Failed to accept emergency: ' + updateError.message)
+    }
 
-      // Attempt to update the emergency
-      const { data: updatedEmergency, error: updateError } = await supabase
-        .from('emergencies')
-        .update({
-          status: 'Accepted',
-          handled_by: `${adminData.first_name} ${adminData.last_name}`,
-          admin_id: adminData.id,
-          accepted_at: new Date().toISOString(),
-        })
-        .eq('id', emergencyId)
-        .eq('status', 'Reported') // Only update if still in 'Reported' status
-        .is('handled_by', null) // Only update if not handled by anyone
-        .select()
+    console.log('📈 Updated emergency length:', updatedEmergency?.length)
 
-      if (updateError) {
-        throw new Error('Failed to accept emergency')
-      }
-
-      if (!updatedEmergency || updatedEmergency.length === 0) {
-        alert(
-          'This emergency was just accepted by another admin. Please try another case.'
-        )
-        loadAvailableEmergencies()
-        loadRecentEmergencies()
-        return
-      }
-
-      // Update admin's calls_attended count
-      await supabase
-        .from('admin')
-        .update({
-          calls_attended: (adminData.calls_attended || 0) + 1,
-        })
-        .eq('id', adminData.id)
-
-      alert('Emergency case accepted successfully!')
-
-      // Refresh all data
+    if (!updatedEmergency || updatedEmergency.length === 0) {
+      console.warn('⚠️ No rows updated - emergency likely accepted by another admin')
+      alert(
+        'This emergency was just accepted by another admin. Please try another case.'
+      )
       loadAvailableEmergencies()
       loadRecentEmergencies()
-      loadSystemStats()
-      loadAdminData()
-    } catch (error) {
-      console.error('Error accepting emergency:', error)
-      alert('Failed to accept emergency. Please try again.')
-    } finally {
-      setAcceptingEmergency(null)
+      return
+    }
+
+    console.log('🔄 Step 3: Updating admin stats...')
+    console.log('📊 Current calls_attended:', adminData.calls_attended)
+    
+    // Update admin's calls_attended count
+    const { data: adminUpdateData, error: adminUpdateError } = await supabase
+      .from('admin')
+      .update({
+        calls_attended: (adminData.calls_attended || 0) + 1,
+      })
+      .eq('id', adminData.id)
+      .select()
+
+    console.log('📊 Admin update result - Data:', adminUpdateData)
+    console.log('📊 Admin update result - Error:', adminUpdateError)
+
+    if (adminUpdateError) {
+      console.warn('⚠️ Failed to update admin stats:', adminUpdateError)
+      // Don't fail the whole operation for this
+    }
+
+    console.log('✅ SUCCESS: Emergency accepted successfully!')
+    alert('Emergency case accepted successfully!')
+
+    // Refresh all data
+    console.log('🔄 Refreshing all data...')
+    loadAvailableEmergencies()
+    loadRecentEmergencies()
+    loadSystemStats()
+    loadAdminData()
+    
+  } catch (error) {
+    console.error('🔥 CATCH BLOCK - Error accepting emergency:', error)
+    console.error('🔥 Error message:', error.message)
+    console.error('🔥 Error stack:', error.stack)
+    
+    // Log the error object in detail
+    if (error.details) {
+      console.error('🔥 Error details:', error.details)
+    }
+    if (error.hint) {
+      console.error('🔥 Error hint:', error.hint)
+    }
+    if (error.code) {
+      console.error('🔥 Error code:', error.code)
+    }
+    
+    alert('Failed to accept emergency. Please try again. Check console for details.')
+  } finally {
+    console.log('🔚 Finally block - resetting accepting state')
+    setAcceptingEmergency(null)
+  }
+}
+
+  const handleEmergencyAction = async (emergencyId, action) => {
+  try {
+    if (action === 'view') {
+      const emergency = recentEmergencies.find((e) => e.id === emergencyId)
+      if (emergency) {
+        // Get full user details
+        const { data: userDetails, error } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', emergency.rawData.user_id)
+          .single()
+        
+        if (!error && userDetails) {
+          // Decrypt medical conditions asynchronously
+          const decryptedMedical = await decrypt(userDetails.medical_conditions)
+          
+          setViewEmergency({
+            ...emergency,
+            userDetails: {
+              ...userDetails,
+              medical_conditions: decryptedMedical
+            }
+          })
+        } else {
+          setViewEmergency(emergency)
+        }
+        setShowViewModal(true)
+      }
+    } else if (action === 'update') {
+      const emergency = recentEmergencies.find((e) => e.id === emergencyId)
+      setSelectedEmergency(emergency)
+      setUpdateData({
+        status: emergency.status,
+        resolution_notes: emergency.resolution_notes || '',
+        priority: emergency.priority,
+      })
+      setShowUpdateModal(true)
+    }
+  } catch (error) {
+    console.error('Error handling emergency action:', error)
+    alert('Failed to load emergency details.')
+  }
+}
+
+const handleDispatch = async () => {
+  if (!viewEmergency) {
+    alert('Emergency data not available')
+    return
+  }
+
+  let latitude, longitude
+
+  // Parse coordinates (same as before)
+  if (viewEmergency.location && typeof viewEmergency.location === 'string') {
+    const locationParts = viewEmergency.location.split(',')
+    
+    if (locationParts.length === 2) {
+      const lat = parseFloat(locationParts[0].trim())
+      const lng = parseFloat(locationParts[1].trim())
+      
+      if (!isNaN(lat) && !isNaN(lng) && 
+          lat >= -90 && lat <= 90 && 
+          lng >= -180 && lng <= 180) {
+        latitude = lat
+        longitude = lng
+      }
     }
   }
 
-  const handleEmergencyAction = async (emergencyId, action) => {
-    try {
-      if (action === 'view') {
-        const emergency = recentEmergencies.find((e) => e.id === emergencyId)
-        setSelectedEmergency(emergency)
-        // You can implement a detailed view modal here
-        alert(`Viewing emergency details for case #${emergencyId}`)
-      } else if (action === 'update') {
-        const emergency = recentEmergencies.find((e) => e.id === emergencyId)
-        setSelectedEmergency(emergency)
-        setUpdateData({
-          status: emergency.status,
-          resolution_notes: emergency.resolution_notes || '',
-          priority: emergency.priority,
-        })
-        setShowUpdateModal(true)
-      }
-    } catch (error) {
-      console.error('Error handling emergency action:', error)
+  if (!latitude || !longitude) {
+    if (viewEmergency.rawData?.latitude && viewEmergency.rawData?.longitude) {
+      latitude = parseFloat(viewEmergency.rawData.latitude)
+      longitude = parseFloat(viewEmergency.rawData.longitude)
     }
   }
+
+  if (!latitude || !longitude || isNaN(latitude) || isNaN(longitude)) {
+    alert('Location coordinates not available for this emergency')
+    return
+  }
+
+  console.log(`Emergency Type: "${viewEmergency.type}" - Fetching multi-service dispatch options`)
+
+  setLoadingServices(true)
+  try {
+    const token = localStorage.getItem('adminToken') || localStorage.getItem('token')
+    
+    const response = await fetch('http://localhost:8000/admin/nearby-services', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        latitude: latitude,
+        longitude: longitude,
+        emergencyType: viewEmergency.type
+      })
+    })
+
+    const result = await response.json()
+    
+    if (!response.ok) {
+      throw new Error(result.error || 'Failed to fetch nearby services')
+    }
+
+    console.log(`Found services for types: ${result.requiredServiceTypes?.join(', ')}`)
+    
+    // Set services data for multi-dispatch
+    setNearbyServices(result.services)
+    setServicesByType(result.servicesByType || {})
+    setRequiredServiceTypes(result.requiredServiceTypes || [])
+    setSelectedServices([]) // Reset selection
+    setShowDispatchModal(true)
+    
+  } catch (error) {
+    console.error('Error fetching nearby services:', error)
+    alert('Failed to load nearby services. Please try again.')
+  } finally {
+    setLoadingServices(false)
+  }
+}
+
+// New function to handle service selection
+const handleServiceSelection = (service, isSelected) => {
+  setSelectedServices(prev => {
+    if (isSelected) {
+      return [...prev, service]
+    } else {
+      return prev.filter(s => s.id !== service.id)
+    }
+  })
+}
+
+const handleServiceDispatch = async (service) => {
+  console.log('🔄 Starting service dispatch...')
+  console.log('📋 Service details:', service)
+  console.log('🚨 Emergency details:', {
+    id: viewEmergency?.id,
+    rawData: viewEmergency?.rawData?.id,
+    status: viewEmergency?.status
+  })
+
+  setDispatchingService(service.id)
+  
+  try {
+    // Use the correct emergency ID - check both possible locations
+    const emergencyId = viewEmergency?.id || viewEmergency?.rawData?.id
+    
+    if (!emergencyId) {
+      throw new Error('Emergency ID not found')
+    }
+
+    console.log('🎯 Updating emergency ID:', emergencyId)
+
+    // First, get the current emergency data including existing dispatch info
+    const { data: currentEmergency, error: fetchError } = await supabase
+      .from('emergencies')
+      .select('id, status, handled_by, dispatched_services, dispatch_history')
+      .eq('id', emergencyId)
+      .single()
+
+    if (fetchError) {
+      console.error('❌ Error fetching current emergency:', fetchError)
+      throw new Error('Failed to fetch emergency details: ' + fetchError.message)
+    }
+
+    if (!currentEmergency) {
+      throw new Error('Emergency not found in database')
+    }
+
+    console.log('✅ Current emergency status:', currentEmergency.status)
+    console.log('✅ Current dispatched_services:', currentEmergency.dispatched_services)
+    console.log('✅ Current dispatch_history:', currentEmergency.dispatch_history)
+
+    // Prepare new dispatch entry
+    const newDispatchEntry = {
+      service: service.name,
+      service_id: service.id,
+      service_type: service.serviceType,
+      dispatched_at: new Date().toISOString(),
+      dispatched_by: `${adminData.first_name} ${adminData.last_name}`,
+      admin_id: adminData.id
+    }
+
+    // Update dispatched_services array (add service name if not already present)
+    const currentServices = currentEmergency.dispatched_services || []
+    const updatedServices = currentServices.includes(service.name) 
+      ? currentServices 
+      : [...currentServices, service.name]
+
+    // Update dispatch_history array (always add new entry)
+    const currentHistory = currentEmergency.dispatch_history || []
+    const updatedHistory = [...currentHistory, newDispatchEntry]
+
+    // Prepare update data
+    const updateData = {
+      status: 'responding',
+      dispatched_services: updatedServices,
+      dispatch_history: updatedHistory
+    }
+
+    console.log('📦 Update payload:', updateData)
+
+    // Update emergency status
+    const { data: updatedData, error: updateError } = await supabase
+      .from('emergencies')
+      .update(updateData)
+      .eq('id', emergencyId)
+      .select() // This will return the updated row(s)
+
+    console.log('📊 Update result - Data:', updatedData)
+    console.log('📊 Update result - Error:', updateError)
+
+    if (updateError) {
+      console.error('❌ Database update error:', updateError)
+      throw new Error('Failed to update emergency status: ' + updateError.message)
+    }
+
+    if (!updatedData || updatedData.length === 0) {
+      console.warn('⚠️ No rows were updated')
+      throw new Error('Emergency update failed - no rows affected')
+    }
+
+    console.log('✅ Successfully updated emergency:', updatedData[0])
+
+    alert(`Emergency dispatched to ${service.name}`)
+    
+    // Close modals and refresh data
+    setShowDispatchModal(false)
+    setShowViewModal(false)
+    
+    // Refresh data
+    await Promise.all([
+      loadRecentEmergencies(),
+      loadSystemStats()
+    ])
+    
+    console.log('✅ Dispatch completed successfully')
+    
+  } catch (error) {
+    console.error('🔥 Service dispatch error:', error)
+    console.error('🔥 Error details:', {
+      message: error.message,
+      stack: error.stack,
+      emergencyId: viewEmergency?.id,
+      serviceName: service?.name
+    })
+    
+    alert('Failed to dispatch service. Error: ' + error.message)
+  } finally {
+    setDispatchingService(null)
+  }
+}
+
+// Also update the multi-service dispatch function
+const handleMultiServiceDispatch = async () => {
+  if (selectedServices.length === 0) {
+    alert('Please select at least one service to dispatch')
+    return
+  }
+
+  setDispatchingMultiple(true)
+  
+  try {
+    const emergencyId = viewEmergency?.id || viewEmergency?.rawData?.id
+    
+    if (!emergencyId) {
+      throw new Error('Emergency ID not found')
+    }
+
+    // Get current emergency data
+    const { data: currentEmergency, error: fetchError } = await supabase
+      .from('emergencies')
+      .select('dispatched_services, dispatch_history')
+      .eq('id', emergencyId)
+      .single()
+
+    if (fetchError) {
+      throw new Error('Failed to fetch current emergency data: ' + fetchError.message)
+    }
+
+    // Prepare service names for dispatched_services array
+    const currentServices = currentEmergency.dispatched_services || []
+    const newServiceNames = selectedServices.map(s => s.name)
+    const updatedServices = [...new Set([...currentServices, ...newServiceNames])] // Remove duplicates
+
+    // Prepare dispatch history entries
+    const currentHistory = currentEmergency.dispatch_history || []
+    const newHistoryEntries = selectedServices.map(service => ({
+      service: service.name,
+      service_id: service.id,
+      service_type: service.serviceType,
+      dispatched_at: new Date().toISOString(),
+      dispatched_by: `${adminData.first_name} ${adminData.last_name}`,
+      admin_id: adminData.id
+    }))
+    const updatedHistory = [...currentHistory, ...newHistoryEntries]
+
+    // Update emergency in database
+    const { data: updatedData, error: updateError } = await supabase
+      .from('emergencies')
+      .update({
+        status: 'responding',
+        dispatched_services: updatedServices,
+        dispatch_history: updatedHistory
+      })
+      .eq('id', emergencyId)
+      .select()
+
+    if (updateError) {
+      throw new Error('Failed to update emergency: ' + updateError.message)
+    }
+
+    if (!updatedData || updatedData.length === 0) {
+      throw new Error('Emergency update failed - no rows affected')
+    }
+
+    console.log('Multi-dispatch successful:', updatedData[0])
+    
+    const serviceNames = selectedServices.map(s => s.name).join(', ')
+    alert(`Successfully dispatched ${selectedServices.length} service(s): ${serviceNames}`)
+    
+    // Close modals and refresh data
+    setShowDispatchModal(false)
+    setShowViewModal(false)
+    setSelectedServices([])
+    
+    // Refresh data
+    await Promise.all([
+      loadRecentEmergencies(),
+      loadSystemStats()
+    ])
+    
+  } catch (error) {
+    console.error('Multi-dispatch error:', error)
+    alert('Failed to dispatch services. Error: ' + error.message)
+  } finally {
+    setDispatchingMultiple(false)
+  }
+}
+
+// Helper function to get service type display name
+const getServiceTypeDisplayName = (serviceType) => {
+  switch (serviceType) {
+    case 'hospital': return 'Medical Services'
+    case 'police': return 'Police Services'
+    case 'fire_station': return 'Fire Services'
+    default: return serviceType
+  }
+}
+
+// Helper function to get service type icon
+const getServiceTypeIcon = (serviceType) => {
+  switch (serviceType) {
+    case 'hospital': return '🏥'
+    case 'police': return '👮'
+    case 'fire_station': return '🚒'
+    default: return '🚨'
+  }
+}
+
+const decrypt = async (encryptedText) => {
+  // Handle null, undefined, or empty values
+  if (!encryptedText || encryptedText.trim() === '') {
+    return 'N/A';
+  }
+
+  try {
+    const token = localStorage.getItem('adminToken') || localStorage.getItem('token');
+    const response = await fetch('http://localhost:8000/admin/decrypt-medical', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ encryptedData: encryptedText })
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to decrypt');
+    }
+
+    const result = await response.json();
+    return result.decryptedData;
+  } catch (error) {
+    console.error('Error decrypting medical conditions:', error);
+    return 'Unable to decrypt medical information';
+  }
+};
 
   const handleUpdateEmergency = async () => {
     if (!selectedEmergency || !adminData?.id) {
@@ -395,7 +834,7 @@ function AdminDashboard() {
 
       // If resolving, add resolution timestamp and notes
       if (updateData.status === 'resolved') {
-        updatePayload.resolved_at = new Date().toISOString()
+        updatePayload.resolved_time = new Date().toISOString()
         updatePayload.resolution_notes = updateData.resolution_notes
         updatePayload.resolved_by = `${adminData.first_name} ${adminData.last_name}`
       }
@@ -580,9 +1019,7 @@ function AdminDashboard() {
             <button className="admin-nav-link" onClick={handleProfile}>
               Profile
             </button>
-            <button className="admin-nav-link" onClick={handleSettings}>
-              Settings
-            </button>
+           
             <button
               className="admin-nav-link admin-logout-btn"
               onClick={handleLogout}
@@ -1074,6 +1511,270 @@ function AdminDashboard() {
           </div>
         </div>
       )}
+      {showViewModal && viewEmergency && (
+  <div className="admin-modal-overlay">
+    <div className="admin-modal admin-view-modal">
+      <div className="admin-modal-header">
+        <h3>Emergency Case Details #{viewEmergency.id}</h3>
+        <button
+          className="admin-modal-close"
+          onClick={() => setShowViewModal(false)}
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="admin-modal-content">
+        {/* Emergency Information */}
+        <div className="admin-view-section">
+          <h4>Emergency Information</h4>
+          <div className="admin-view-grid">
+            <div className="admin-view-item">
+              <span className="admin-view-label">Type:</span>
+              <span className="admin-view-value">{viewEmergency.type}</span>
+            </div>
+            <div className="admin-view-item">
+              <span className="admin-view-label">Priority:</span>
+              <span className={`admin-view-value ${getPriorityColor(viewEmergency.priority)}`}>
+                {viewEmergency.priority}
+              </span>
+            </div>
+            <div className="admin-view-item">
+              <span className="admin-view-label">Status:</span>
+              <span className={`admin-view-value ${getStatusColor(viewEmergency.status)}`}>
+                {viewEmergency.status}
+              </span>
+            </div>
+            <div className="admin-view-item">
+              <span className="admin-view-label">Location:</span>
+              <span className="admin-view-value">{viewEmergency.location}</span>
+            </div>
+            <div className="admin-view-item">
+              <span className="admin-view-label">Reported:</span>
+              <span className="admin-view-value">
+                {new Date(viewEmergency.reported_time).toLocaleString()}
+              </span>
+            </div>
+            {viewEmergency.accepted_at && (
+              <div className="admin-view-item">
+                <span className="admin-view-label">Accepted:</span>
+                <span className="admin-view-value">
+                  {new Date(viewEmergency.accepted_at).toLocaleString()}
+                </span>
+              </div>
+            )}
+            <div className="admin-view-item">
+              <span className="admin-view-label">Handled By:</span>
+              <span className="admin-view-value">{viewEmergency.handled_by}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* User Information */}
+        <div className="admin-view-section">
+          <h4>Reporter Information</h4>
+          <div className="admin-view-grid">
+            <div className="admin-view-item">
+              <span className="admin-view-label">Name:</span>
+              <span className="admin-view-value">{viewEmergency.user_name}</span>
+            </div>
+            <div className="admin-view-item">
+              <span className="admin-view-label">Phone:</span>
+              <span className="admin-view-value">{viewEmergency.user_phone}</span>
+            </div>
+            {viewEmergency.userDetails && (
+              <>
+                <div className="admin-view-item">
+                  <span className="admin-view-label">Email:</span>
+                  <span className="admin-view-value">{viewEmergency.userDetails.email}</span>
+                </div>
+                <div className="admin-view-item">
+                  <span className="admin-view-label">Address:</span>
+                  <span className="admin-view-value">
+                    {viewEmergency.userDetails.street_address && 
+                     `${viewEmergency.userDetails.street_address}, ${viewEmergency.userDetails.city}, ${viewEmergency.userDetails.state} ${viewEmergency.userDetails.zip_code}`}
+                  </span>
+                </div>
+                {viewEmergency.userDetails.medical_conditions && (
+                  <div className="admin-view-item admin-view-medical">
+                    <span className="admin-view-label">Medical Conditions:</span>
+                    <span className="admin-view-value admin-medical-info">
+                      {viewEmergency.userDetails.medical_conditions}
+                    </span>
+                  </div>
+                )}
+                <div className="admin-view-item">
+                  <span className="admin-view-label">Emergency Contact:</span>
+                  <span className="admin-view-value">
+                    {viewEmergency.userDetails.primary_emergency_contact} - {viewEmergency.userDetails.primary_emergency_phone}
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Resolution Notes if any */}
+        {viewEmergency.resolution_notes && (
+          <div className="admin-view-section">
+            <h4>Resolution Notes</h4>
+            <div className="admin-resolution-notes">
+              {viewEmergency.resolution_notes}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="admin-modal-actions">
+        <button
+          className="admin-modal-btn admin-cancel-btn"
+          onClick={() => setShowViewModal(false)}
+        >
+          Close
+        </button>
+        {viewEmergency.status !== 'resolved' && viewEmergency.status !== 'responding' && (
+          <button
+            className="admin-modal-btn admin-dispatch-btn"
+            onClick={handleDispatch}
+            disabled={loadingServices}
+          >
+            {loadingServices ? 'Loading Services...' : 'Dispatch Services'}
+          </button>
+        )}
+      </div>
+    </div>
+  </div>
+)}
+
+// Replace the existing Dispatch Services Modal JSX with this enhanced version
+
+{/* Enhanced Multi-Service Dispatch Modal */}
+{showDispatchModal && (
+  <div className="admin-modal-overlay">
+    <div className="admin-modal admin-dispatch-modal admin-multi-dispatch-modal">
+      <div className="admin-modal-header">
+        <h3>Dispatch Emergency Services</h3>
+        <button
+          className="admin-modal-close"
+          onClick={() => setShowDispatchModal(false)}
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="admin-modal-content">
+        <div className="admin-dispatch-info">
+          <div className="admin-emergency-info">
+            <h4>Emergency: {viewEmergency?.type}</h4>
+            <p>Required services: {requiredServiceTypes.map(type => getServiceTypeDisplayName(type)).join(', ')}</p>
+            <p>Found {nearbyServices.length} nearby services</p>
+          </div>
+          
+          {selectedServices.length > 0 && (
+            <div className="admin-selected-services">
+              <h5>Selected for Dispatch ({selectedServices.length}):</h5>
+              <div className="admin-selected-list">
+                {selectedServices.map(service => (
+                  <span key={service.id} className="admin-selected-tag">
+                    {getServiceTypeIcon(service.serviceType)} {service.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="admin-services-by-type">
+          {Object.keys(servicesByType).map(serviceType => (
+            <div key={serviceType} className="admin-service-type-section">
+              <h4 className="admin-service-type-header">
+                {getServiceTypeIcon(serviceType)} {getServiceTypeDisplayName(serviceType)}
+                <span className="admin-service-count">({servicesByType[serviceType]?.length || 0})</span>
+              </h4>
+              
+              <div className="admin-service-type-list">
+                {(servicesByType[serviceType] || []).map((service) => (
+                  <div key={service.id} className="admin-service-card admin-selectable-service">
+                    <div className="admin-service-selector">
+                      <input
+                        type="checkbox"
+                        id={`service-${service.id}`}
+                        checked={selectedServices.some(s => s.id === service.id)}
+                        onChange={(e) => handleServiceSelection(service, e.target.checked)}
+                        className="admin-service-checkbox"
+                      />
+                      <label htmlFor={`service-${service.id}`} className="admin-service-checkbox-label">
+                        Select
+                      </label>
+                    </div>
+                    
+                    <div className="admin-service-info">
+                      <div className="admin-service-main">
+                        <h5>{service.name}</h5>
+                        <p className="admin-service-address">{service.address}</p>
+                        <div className="admin-service-details">
+                          <span className="admin-service-distance">{service.distance} km away</span>
+                          {service.rating !== 'N/A' && (
+                            <span className="admin-service-rating">★ {service.rating}</span>
+                          )}
+                          {service.isOpen !== null && (
+                            <span className={`admin-service-status ${service.isOpen ? 'open' : 'closed'}`}>
+                              {service.isOpen ? 'Open' : 'Closed'}
+                            </span>
+                          )}
+                        </div>
+                        <p className="admin-service-phone">{service.phone}</p>
+                      </div>
+                    </div>
+                    
+                    <div className="admin-service-quick-dispatch">
+                      <button
+                        className="admin-quick-dispatch-btn"
+                        onClick={() => handleServiceDispatch(service)}
+                        disabled={dispatchingService === service.id}
+                        title="Dispatch this service only"
+                      >
+                        {dispatchingService === service.id ? 'Dispatching...' : 'Dispatch Only'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {nearbyServices.length === 0 && (
+          <div className="admin-no-services">
+            <p>No services found nearby. Please try manual coordination.</p>
+          </div>
+        )}
+      </div>
+
+      <div className="admin-modal-actions">
+        <button
+          className="admin-modal-btn admin-cancel-btn"
+          onClick={() => setShowDispatchModal(false)}
+        >
+          Close
+        </button>
+        
+        {selectedServices.length > 0 && (
+          <button
+            className="admin-modal-btn admin-dispatch-selected-btn"
+            onClick={handleMultiServiceDispatch}
+            disabled={dispatchingMultiple}
+          >
+            {dispatchingMultiple 
+              ? 'Dispatching...' 
+              : `Dispatch Selected (${selectedServices.length})`
+            }
+          </button>
+        )}
+      </div>
+    </div>
+  </div>
+)}
 
       {/* Footer */}
       <footer className="admin-admin-footer">

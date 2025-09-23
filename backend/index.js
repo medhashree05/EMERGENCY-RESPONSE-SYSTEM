@@ -1322,6 +1322,429 @@ app.delete('/locations/:id', authenticateToken, async (req, res) => {
   }
 })
 
+// Replace the existing /admin/nearby-services route with this enhanced version
+app.post('/admin/nearby-services', authenticateAdmin, async (req, res) => {
+  try {
+    let { latitude, longitude, emergencyType, location } = req.body
+
+    console.log('Received request body:', req.body)
+
+    // Parse coordinates from location string if needed
+    if (!latitude && !longitude && location && typeof location === 'string') {
+      console.log('Parsing coordinates from location string:', location)
+      
+      const locationParts = location.split(',')
+      if (locationParts.length === 2) {
+        const lat = parseFloat(locationParts[0].trim())
+        const lng = parseFloat(locationParts[1].trim())
+        
+        if (!isNaN(lat) && !isNaN(lng) && 
+            lat >= -90 && lat <= 90 && 
+            lng >= -180 && lng <= 180) {
+          latitude = lat
+          longitude = lng
+          console.log('Successfully parsed coordinates:', { latitude, longitude })
+        }
+      }
+    }
+
+    // Validation
+    if (!latitude || !longitude || !emergencyType) {
+      return res.status(400).json({ 
+        error: 'Missing required parameters: latitude, longitude, emergencyType' 
+      })
+    }
+
+    // Enhanced service type mapping for multi-dispatch
+    const getRequiredServiceTypes = (emergencyType) => {
+      const type = emergencyType.toLowerCase()
+      
+      if (type.includes('fire')) {
+        return ['fire_station', 'hospital', 'police'] // Fire emergencies need all services
+      }
+      
+      if (type.includes('accident')) {
+        return ['police', 'hospital'] // Accidents need police and medical
+      }
+      
+      if (type.includes('police') || type.includes('crime') || type.includes('theft') || 
+          type.includes('violence') || type.includes('assault') || type.includes('robbery')) {
+        return ['police']
+      }
+      
+      if (type.includes('medical') || type.includes('health') || type.includes('injury') || 
+          type.includes('heart')) {
+        return ['hospital']
+      }
+      
+      // For general emergencies, return all service types
+      return ['hospital', 'police', 'fire_station']
+    }
+
+    const requiredServiceTypes = getRequiredServiceTypes(emergencyType)
+    console.log(`Emergency type: "${emergencyType}" requires services: ${requiredServiceTypes.join(', ')}`)
+
+    // Search radius in meters (10km)
+    const searchRadius = 10000
+    
+    // Collect all services for all required types
+    const allServices = []
+
+    for (const serviceType of requiredServiceTypes) {
+      console.log(`Searching for ${serviceType} services...`)
+      
+      // Build Overpass API query for this service type
+      const overpassQuery = `
+        [out:json][timeout:25];
+        (
+          node["amenity"="${serviceType}"](around:${searchRadius},${latitude},${longitude});
+          way["amenity"="${serviceType}"](around:${searchRadius},${latitude},${longitude});
+          relation["amenity"="${serviceType}"](around:${searchRadius},${latitude},${longitude});
+        );
+        out center meta;
+      `
+
+      try {
+        const overpassUrl = 'https://overpass-api.de/api/interpreter'
+        const response = await fetch(overpassUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: `data=${encodeURIComponent(overpassQuery)}`
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          console.log(`Found ${data.elements?.length || 0} ${serviceType} results`)
+
+          // Process and format results for this service type
+          const services = (data.elements || [])
+            .filter(element => element.tags && element.tags.name)
+            .map(element => {
+              let lat, lon
+              if (element.lat && element.lon) {
+                lat = element.lat
+                lon = element.lon
+              } else if (element.center) {
+                lat = element.center.lat
+                lon = element.center.lon
+              } else {
+                return null
+              }
+
+              const distance = calculateDistance(latitude, longitude, lat, lon)
+              
+              return {
+                id: `${serviceType}_${element.id}`,
+                name: element.tags.name,
+                address: buildAddress(element.tags),
+                phone: element.tags.phone || element.tags['contact:phone'] || 'Contact information not available',
+                distance: distance,
+                location: { lat, lng: lon },
+                rating: 'N/A',
+                isOpen: parseOpeningHours(element.tags.opening_hours),
+                serviceType: serviceType, // Add service type for categorization
+                types: [serviceType],
+                website: element.tags.website || element.tags['contact:website'] || null,
+                emergency: element.tags.emergency === 'yes'
+              }
+            })
+            .filter(service => service !== null)
+            .sort((a, b) => a.distance - b.distance)
+            .slice(0, 5) // Top 5 for each service type
+
+          allServices.push(...services)
+        }
+      } catch (error) {
+        console.error(`Error fetching ${serviceType} services:`, error)
+      }
+    }
+
+    // Add fallback services if no services found
+    if (allServices.length === 0) {
+      const fallbackServices = getFallbackEmergencyServices(latitude, longitude, requiredServiceTypes)
+      allServices.push(...fallbackServices)
+    }
+
+    // Group services by type for better frontend handling
+    const servicesByType = {}
+    allServices.forEach(service => {
+      if (!servicesByType[service.serviceType]) {
+        servicesByType[service.serviceType] = []
+      }
+      servicesByType[service.serviceType].push(service)
+    })
+
+    console.log(`Total processed services: ${allServices.length}`)
+    console.log(`Service types found: ${Object.keys(servicesByType).join(', ')}`)
+
+    res.json({
+      success: true,
+      services: allServices,
+      servicesByType: servicesByType,
+      requiredServiceTypes: requiredServiceTypes,
+      emergencyType,
+      searchLocation: { latitude, longitude },
+      count: allServices.length,
+      source: 'OpenStreetMap'
+    })
+
+  } catch (error) {
+    console.error('Error fetching nearby services:', error)
+    
+    // Enhanced fallback for multi-service
+    const requiredServiceTypes = ['hospital', 'police', 'fire_station']
+    const fallbackServices = getFallbackEmergencyServices(latitude, longitude, requiredServiceTypes)
+    
+    res.json({
+      success: true,
+      services: fallbackServices,
+      servicesByType: {
+        hospital: fallbackServices.filter(s => s.serviceType === 'hospital'),
+        police: fallbackServices.filter(s => s.serviceType === 'police'),
+        fire_station: fallbackServices.filter(s => s.serviceType === 'fire_station')
+      },
+      requiredServiceTypes: requiredServiceTypes,
+      emergencyType,
+      searchLocation: { latitude, longitude },
+      count: fallbackServices.length,
+      source: 'Fallback',
+      note: 'Using fallback emergency contacts due to service unavailability'
+    })
+  }
+})
+
+// Enhanced fallback function for multiple service types
+function getFallbackEmergencyServices(lat, lon, requiredServiceTypes = ['hospital', 'police', 'fire_station']) {
+  const fallbackServices = []
+  
+  if (requiredServiceTypes.includes('police')) {
+    fallbackServices.push({
+      id: 'emergency_police',
+      name: 'Police Emergency',
+      address: 'India Emergency Services',
+      phone: '100',
+      distance: 0,
+      location: { lat, lng: lon },
+      rating: 'N/A',
+      isOpen: true,
+      serviceType: 'police',
+      types: ['emergency', 'police'],
+      emergency: true
+    })
+  }
+  
+  if (requiredServiceTypes.includes('fire_station')) {
+    fallbackServices.push({
+      id: 'emergency_fire',
+      name: 'Fire Emergency',
+      address: 'India Emergency Services',
+      phone: '101',
+      distance: 0,
+      location: { lat, lng: lon },
+      rating: 'N/A',
+      isOpen: true,
+      serviceType: 'fire_station',
+      types: ['emergency', 'fire_station'],
+      emergency: true
+    })
+  }
+  
+  if (requiredServiceTypes.includes('hospital')) {
+    fallbackServices.push({
+      id: 'emergency_medical',
+      name: 'Medical Emergency',
+      address: 'India Emergency Services',
+      phone: '108',
+      distance: 0,
+      location: { lat, lng: lon },
+      rating: 'N/A',
+      isOpen: true,
+      serviceType: 'hospital',
+      types: ['emergency', 'hospital'],
+      emergency: true
+    })
+  }
+  
+  return fallbackServices
+}
+
+// New route for multi-service dispatch
+app.post('/admin/dispatch-services', authenticateAdmin, async (req, res) => {
+  try {
+    const { emergencyId, services } = req.body // services is array of service objects
+    
+    console.log('Multi-dispatch request:', { emergencyId, serviceCount: services?.length })
+    
+    if (!emergencyId || !services || !Array.isArray(services) || services.length === 0) {
+      return res.status(400).json({ 
+        error: 'Emergency ID and services array are required' 
+      })
+    }
+
+    // Get current emergency
+    const { data: currentEmergency, error: fetchError } = await supabase
+      .from('emergencies')
+      .select('*')
+      .eq('id', emergencyId)
+      .single()
+
+    if (fetchError || !currentEmergency) {
+      return res.status(404).json({ error: 'Emergency not found' })
+    }
+
+    // Get admin info
+    const adminId = req.user.user_id
+    const { data: adminData } = await supabase
+      .from('admin')
+      .select('first_name, last_name')
+      .eq('id', adminId)
+      .single()
+
+    const adminName = adminData ? `${adminData.first_name} ${adminData.last_name}` : 'Unknown Admin'
+
+    // Prepare dispatch records
+    const currentTime = new Date().toISOString()
+    const dispatchedServices = []
+    const dispatchHistory = currentEmergency.dispatch_history || []
+
+    services.forEach(service => {
+      const dispatchRecord = {
+        service_name: service.name,
+        service_type: service.serviceType,
+        service_id: service.id,
+        dispatched_at: currentTime,
+        dispatched_by: adminName,
+        admin_id: adminId,
+        phone: service.phone,
+        address: service.address,
+        distance: service.distance
+      }
+      
+      dispatchedServices.push(dispatchRecord)
+      dispatchHistory.push(dispatchRecord)
+    })
+
+    // Update emergency with dispatch information
+    const updatePayload = {
+      status: 'responding',
+      dispatched_services: dispatchedServices,
+      dispatch_history: dispatchHistory,
+      updated_at: currentTime
+    }
+
+    const { data: updatedData, error: updateError } = await supabase
+      .from('emergencies')
+      .update(updatePayload)
+      .eq('id', emergencyId)
+      .select()
+
+    if (updateError) {
+      console.error('Failed to update emergency:', updateError)
+      return res.status(500).json({ error: 'Failed to dispatch services' })
+    }
+
+    console.log(`Successfully dispatched ${services.length} services to emergency ${emergencyId}`)
+
+    res.json({
+      success: true,
+      message: `Successfully dispatched ${services.length} service(s)`,
+      dispatchedServices: dispatchedServices,
+      emergencyId: emergencyId,
+      updatedEmergency: updatedData[0]
+    })
+
+  } catch (error) {
+    console.error('Multi-dispatch error:', error)
+    res.status(500).json({ error: 'Failed to dispatch services' })
+  }
+})
+
+// Helper functions
+function buildAddress(tags) {
+  const addressParts = []
+  
+  if (tags['addr:housenumber']) addressParts.push(tags['addr:housenumber'])
+  if (tags['addr:street']) addressParts.push(tags['addr:street'])
+  if (tags['addr:city']) addressParts.push(tags['addr:city'])
+  if (tags['addr:state']) addressParts.push(tags['addr:state'])
+  if (tags['addr:postcode']) addressParts.push(tags['addr:postcode'])
+  
+  return addressParts.length > 0 ? addressParts.join(', ') : 'Address not available'
+}
+
+function parseOpeningHours(openingHours) {
+  if (!openingHours) return null
+  
+  // Simple check for 24/7
+  if (openingHours.includes('24/7')) return true
+  
+  // For more complex parsing, you'd need a library like opening_hours.js
+  // For now, return null (unknown)
+  return null
+}
+
+function getFallbackEmergencyServices(lat, lon) {
+  // Return basic emergency contacts as fallback
+  return [
+    {
+      id: 'emergency_police',
+      name: 'Police Emergency',
+      address: 'India Emergency Services',
+      phone: '100',
+      distance: 0,
+      location: { lat, lng: lon },
+      rating: 'N/A',
+      isOpen: true,
+      types: ['emergency', 'police'],
+      emergency: true
+    },
+    {
+      id: 'emergency_fire',
+      name: 'Fire Emergency',
+      address: 'India Emergency Services',
+      phone: '101',
+      distance: 0,
+      location: { lat, lng: lon },
+      rating: 'N/A',
+      isOpen: true,
+      types: ['emergency', 'fire_station'],
+      emergency: true
+    },
+    {
+      id: 'emergency_medical',
+      name: 'Medical Emergency',
+      address: 'India Emergency Services',
+      phone: '108',
+      distance: 0,
+      location: { lat, lng: lon },
+      rating: 'N/A',
+      isOpen: true,
+      types: ['emergency', 'hospital'],
+      emergency: true
+    }
+  ]
+}
+// Helper function for distance calculation
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371 // Earth's radius in km
+  const dLat = deg2rad(lat2 - lat1)
+  const dLon = deg2rad(lon2 - lon1)
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * 
+    
+    Math.sin(dLon/2) * Math.sin(dLon/2)
+  
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+  const distance = R * c
+  return Math.round(distance * 100) / 100 // Round to 2 decimal places
+}
+
+function deg2rad(deg) {
+  return deg * (Math.PI/180)
+}
 // PUT /locations/:id - Update a saved location
 app.put('/locations/:id', authenticateToken, async (req, res) => {
   try {
@@ -1830,6 +2253,30 @@ app.post(
     }
   }
 )
+
+app.post('/admin/decrypt-medical', authenticateAdmin, async (req, res) => {
+  try {
+    const { encryptedData } = req.body
+
+    if (!encryptedData || encryptedData.trim() === '') {
+      return res.json({ decryptedData: 'N/A' })
+    }
+
+    // Use your existing decrypt function from the backend
+    const decryptedData = decrypt(encryptedData)
+    
+    res.json({ 
+      success: true, 
+      decryptedData: decryptedData || 'Unable to decrypt' 
+    })
+  } catch (error) {
+    console.error('Decryption error:', error)
+    res.json({ 
+      success: false, 
+      decryptedData: 'Unable to decrypt medical information' 
+    })
+  }
+})
 
 app.post('/get-nearby-services', async (req, res) => {
   try {
