@@ -5,23 +5,17 @@ import VoiceRecorder from './VoiceRecorder.js'
 import './ChatPage.css'
 
 function ChatPage() {
-  const [messages, setMessages] = useState([
-    {
-      id: 1,
-      text: "Hello! I'm your Emergency Response AI Assistant. How can I help you today? I can assist with emergency information, safety tips, first aid guidance, and connecting you with appropriate services.",
-      sender: 'ai',
-      timestamp: new Date(),
-    },
-  ])
+  const [messages, setMessages] = useState([])
   const [inputText, setInputText] = useState('')
   const [isTyping, setIsTyping] = useState(false)
   const [isEmergency, setIsEmergency] = useState(false)
   const [sessionId, setSessionId] = useState(null)
   const [messageCount, setMessageCount] = useState(0)
   const [showLocationPrompt, setShowLocationPrompt] = useState(false)
+  const [currentEmergencyType, setCurrentEmergencyType] = useState(null) // 🆕 Track current emergency type
   const messagesEndRef = useRef(null)
   const navigate = useNavigate()
-  const location = useLocation() // 🆕 Get location state for emergency data
+  const location = useLocation()
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -30,6 +24,47 @@ function ChatPage() {
   useEffect(() => {
     scrollToBottom()
   }, [messages])
+
+  // 🆕 Function to get emergency-specific intro messages
+  const getEmergencyIntroMessage = (emergencyType) => {
+    const emergencyIntros = {
+      'Police Emergency': {
+        icon: '🛡️',
+        title: 'POLICE EMERGENCY ASSISTANCE',
+        message: "🚨 **POLICE EMERGENCY ACTIVE** - I'm here to help with your police emergency situation!\n\nI can assist you with:\n• Understanding police procedures\n• Finding nearby police stations\n• Safety guidance while waiting for police\n• Documentation tips for incidents\n• Legal rights information\n\n**If you're in immediate danger, call 100 (Police) right now!**\n\nWhat specific police assistance do you need?"
+      },
+      'Medical Emergency': {
+        icon: '❤️',
+        title: 'MEDICAL EMERGENCY ASSISTANCE',
+        message: "🚑 **MEDICAL EMERGENCY ACTIVE** - I'm here to provide immediate medical guidance!\n\nI can help with:\n• First aid instructions\n• CPR and basic life support guidance\n• Symptom assessment\n• Finding nearest hospitals\n• Medical emergency procedures\n• Medication information\n\n**For life-threatening emergencies, call 108 (Ambulance) immediately!**\n\nDescribe your medical situation - I'll provide appropriate guidance."
+      },
+      'Fire Emergency': {
+        icon: '🔥',
+        title: 'FIRE EMERGENCY ASSISTANCE',
+        message: "🔥 **FIRE EMERGENCY ACTIVE** - I'm here to help with fire safety and evacuation!\n\nI can assist with:\n• Fire evacuation procedures\n• Fire safety protocols\n• Smoke inhalation guidance\n• Burn treatment instructions\n• Finding fire department locations\n• Fire prevention tips\n\n**For active fires, call 101 (Fire Department) immediately!**\n\nTell me about your fire emergency situation."
+      },
+      'Accident Emergency': {
+        icon: '🚗',
+        title: 'ACCIDENT EMERGENCY ASSISTANCE',
+        message: "🚗 **ACCIDENT EMERGENCY ACTIVE** - I'm here to help with accident response and safety!\n\nI can help with:\n• Accident scene safety procedures\n• Injury assessment and first aid\n• Traffic accident protocols\n• Insurance and documentation guidance\n• Towing and recovery services\n• Legal requirements after accidents\n\n**For serious accidents with injuries, call 108 (Ambulance) or 100 (Police)!**\n\nDescribe the accident situation - I'll guide you through the proper response."
+      }
+    }
+
+    return emergencyIntros[emergencyType] || {
+      icon: '🚨',
+      title: 'EMERGENCY ASSISTANCE',
+      message: "🚨 **EMERGENCY ACTIVE** - I'm here to help with your emergency situation!\n\nI can provide guidance, connect you with appropriate services, and offer support during this critical time.\n\n**For life-threatening emergencies, call emergency services immediately!**\n\nHow can I assist you right now?"
+    }
+  }
+
+  // 🆕 Function to get default (non-emergency) intro message
+  const getDefaultIntroMessage = () => {
+    return {
+      icon: '🤖',
+      title: 'Emergency Response AI Assistant',
+      message: "Hello! I'm your Emergency Response AI Assistant. How can I help you today? I can assist with emergency information, safety tips, first aid guidance, and connecting you with appropriate services."
+    }
+  }
 
   // 🆕 Enhanced initialization for emergency sessions
   useEffect(() => {
@@ -44,18 +79,26 @@ function ChatPage() {
       if (emergencyState || (storedEmergencyResponse && emergencySessionId)) {
         // Handle emergency session
         const emergencyData = emergencyState || JSON.parse(storedEmergencyResponse)
+        const emergencyType = emergencyData.emergencyType || emergencyState?.emergencyType
         
         setSessionId(emergencySessionId)
         setIsEmergency(true)
+        setCurrentEmergencyType(emergencyType) // 🆕 Set current emergency type
+        
+        // Get emergency-specific intro message
+        const introData = getEmergencyIntroMessage(emergencyType)
         
         // Add emergency messages to chat
         const emergencyMessages = [
           {
             id: 1,
-            text: "🚨 EMERGENCY SESSION ACTIVATED - I'm here to help you with your emergency situation!",
+            text: introData.message,
             sender: 'ai',
             timestamp: new Date(),
-            isUrgent: true
+            isUrgent: true,
+            emergencyType: emergencyType, // 🆕 Store emergency type in message
+            icon: introData.icon,
+            title: introData.title
           }
         ]
         
@@ -87,7 +130,18 @@ function ChatPage() {
         setMessageCount(emergencyMessages.length - 1)
         
       } else {
-        // Normal session initialization
+        // Normal session initialization with default intro
+        const defaultIntro = getDefaultIntroMessage()
+        
+        setMessages([{
+          id: 1,
+          text: defaultIntro.message,
+          sender: 'ai',
+          timestamp: new Date(),
+          icon: defaultIntro.icon,
+          title: defaultIntro.title
+        }])
+        
         const savedSessionId = localStorage.getItem('chatSessionId')
         if (savedSessionId) {
           setSessionId(savedSessionId)
@@ -303,16 +357,20 @@ function ChatPage() {
       console.error('Error clearing session:', error)
     }
 
-    // Reset local state
+    // Reset local state with default intro
+    const defaultIntro = getDefaultIntroMessage()
     setMessages([{
       id: 1,
-      text: "Hello! I'm your Emergency Response AI Assistant. How can I help you today?",
+      text: defaultIntro.message,
       sender: 'ai',
       timestamp: new Date(),
+      icon: defaultIntro.icon,
+      title: defaultIntro.title
     }])
     setSessionId(null)
     setMessageCount(0)
-    setIsEmergency(false) // 🆕 Reset emergency state
+    setIsEmergency(false)
+    setCurrentEmergencyType(null) // 🆕 Reset emergency type
     setShowLocationPrompt(false)
     localStorage.removeItem('chatSessionId')
   }
@@ -328,19 +386,58 @@ function ChatPage() {
     window.location.href = 'tel:911'
   }
 
-  // 🆕 Enhanced quick responses for emergency scenarios
-  const quickResponses = [
-    'I need help with first aid',
-    'How do I call emergency services?',
-    "I'm having chest pain",
-    "There's a fire",
-    'I need mental health support',
-    "I'm lost and need location help",
-    'Store my current location',
-    'What should I do while waiting for help?', // 🆕 Emergency-specific
-    'Find nearest hospital', // 🆕 Emergency-specific
-    'Contact emergency services' // 🆕 Emergency-specific
-  ]
+  // 🆕 Enhanced quick responses based on emergency type
+  const getQuickResponses = (emergencyType) => {
+    const emergencyQuickResponses = {
+      'Police Emergency': [
+        'I need police assistance now',
+        'How do I report a crime?',
+        'I feel unsafe',
+        'Document this incident',
+        'What are my rights?',
+        'Find nearest police station'
+      ],
+      'Medical Emergency': [
+        'I need first aid help',
+        'Someone is unconscious',
+        'Chest pain symptoms',
+        'Severe bleeding',
+        'Find nearest hospital',
+        'CPR instructions'
+      ],
+      'Fire Emergency': [
+        'How to evacuate safely?',
+        'Smoke inhalation help',
+        'Fire extinguisher use',
+        'Burn treatment',
+        'Electrical fire safety',
+        'Find fire department'
+      ],
+      'Accident Emergency': [
+        'Car accident protocol',
+        'Check for injuries',
+        'Call insurance',
+        'Document the scene',
+        'Towing services',
+        'Legal requirements'
+      ]
+    }
+
+    return emergencyQuickResponses[emergencyType] || [
+      'I need help with first aid',
+      'How do I call emergency services?',
+      "I'm having chest pain",
+      "There's a fire",
+      'I need mental health support',
+      "I'm lost and need location help",
+      'Store my current location',
+      'What should I do while waiting for help?',
+      'Find nearest hospital',
+      'Contact emergency services'
+    ]
+  }
+
+  const quickResponses = getQuickResponses(currentEmergencyType)
 
   return (
     <div className="chat-page">
@@ -351,9 +448,15 @@ function ChatPage() {
             ← Back
           </button>
           <div className="chat-title">
-            <h1>🤖 Emergency AI Assistant</h1>
+            <h1>
+              {currentEmergencyType ? 
+                getEmergencyIntroMessage(currentEmergencyType).icon : '🤖'} 
+              {currentEmergencyType ? 
+                getEmergencyIntroMessage(currentEmergencyType).title : 
+                'Emergency AI Assistant'}
+            </h1>
             <span className="chat-status">
-              {isEmergency ? '🚨 Emergency Mode' : 'Online'} • {messageCount > 0 && `${messageCount} messages`}
+              {isEmergency ? `🚨 ${currentEmergencyType || 'Emergency Mode'}` : 'Online'} • {messageCount > 0 && `${messageCount} messages`}
             </span>
           </div>
           <div className="header-actions">
@@ -367,7 +470,7 @@ function ChatPage() {
               </button>
             )}
             <button className="emergency-call-btn" onClick={handleEmergencyCall}>
-              🚨 Call 911
+              🚨 Call 100
             </button>
           </div>
         </div>
@@ -375,16 +478,21 @@ function ChatPage() {
 
       {/* Emergency Alert */}
       {isEmergency && (
-        <div className="emergency-alert">
+        <div className={`emergency-alert ${currentEmergencyType ? currentEmergencyType.toLowerCase().replace(' ', '-') : ''}`}>
           <div className="emergency-alert-content">
-            <span className="emergency-icon">🚨</span>
+            <span className="emergency-icon">
+              {currentEmergencyType ? getEmergencyIntroMessage(currentEmergencyType).icon : '🚨'}
+            </span>
             <div className="emergency-text">
-              <strong>Emergency Mode Active</strong>
-              <p>If this is a life-threatening emergency, call 911 immediately</p>
+              <strong>{currentEmergencyType || 'Emergency Mode Active'}</strong>
+              <p>If this is a life-threatening emergency, call emergency services immediately</p>
             </div>
             <button
               className="emergency-dismiss"
-              onClick={() => setIsEmergency(false)}
+              onClick={() => {
+                setIsEmergency(false)
+                setCurrentEmergencyType(null)
+              }}
             >
               ✕
             </button>
@@ -427,13 +535,18 @@ function ChatPage() {
               key={message.id}
               className={`message ${message.sender} ${
                 message.isUrgent ? 'urgent' : ''
-              }`}
+              } ${message.emergencyType ? 'emergency-intro' : ''}`}
             >
               <div className="message-content">
                 <div className="message-avatar">
-                  {message.sender === 'ai' ? '🤖' : '👤'}
+                  {message.sender === 'ai' ? (message.icon || '🤖') : '👤'}
                 </div>
                 <div className="message-bubble">
+                  {message.title && (
+                    <div className="message-title">
+                      {message.title}
+                    </div>
+                  )}
                   <div className="message-text">
                     {message.text.split('\n').map((line, index) => (
                       <div key={index}>{line}</div>
@@ -493,7 +606,10 @@ function ChatPage() {
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder="Type your message here... For emergencies, call 911 immediately."
+            placeholder={currentEmergencyType ? 
+              `Describe your ${currentEmergencyType.toLowerCase()} situation...` : 
+              "Type your message here... For emergencies, call 911 immediately."
+            }
             rows="1"
             disabled={isTyping}
           />

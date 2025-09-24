@@ -103,7 +103,7 @@ export default function Dashboard() {
     switch (status?.toLowerCase()) {
       case 'reported':
         return 'status-active'
-      case 'dispatched':
+      case 'responding':
         return 'status-responding'
       case 'in progress':
         return 'status-responding'
@@ -147,17 +147,15 @@ export default function Dashboard() {
 
   const getArrivalStatus = (status, resolvedTime) => {
     switch (status) {
-      case 'Resolved':
-      case 'Closed':
-        return resolvedTime ? 'Completed' : 'Resolved'
-      case 'In Progress':
+      case 'resolved':
+        return 'Completed' 
+      case 'Accepted':
         return 'On Scene'
-      case 'Dispatched':
+      case 'Responding':
         return 'En Route'
       case 'Reported':
         return 'Pending'
-      default:
-        return 'Unknown'
+     
     }
   }
 
@@ -261,7 +259,7 @@ export default function Dashboard() {
                           {emergency.priority}
                         </span>
                       </p>
-                      <p>🚑 Dispatch: {emergency.dispatched_unit || 'Not assigned'}</p>
+                      <p>🚑 Dispatch: {emergency.dispatched_services || 'Not assigned'}</p>
                       <p>⏳ ETA: {formatETA(emergency.eta)}</p>
                       <p>✅ Arrival: {getArrivalStatus(emergency.status, emergency.resolved_time)}</p>
                     </div>
@@ -308,7 +306,7 @@ export default function Dashboard() {
                       {emergency.status}
                     </span>
                   </div>
-                  <div>{emergency.dispatched_unit || 'Not assigned'}</div>
+                  <div>{emergency.dispatched_services || 'Not assigned'}</div>
                   <div>{getArrivalStatus(emergency.status, emergency.resolved_time)}</div>
                 </div>
               ))}

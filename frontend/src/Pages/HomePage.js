@@ -5,7 +5,10 @@ import './HomePage.css';
 function HomePage() {
   const [emergencyActive, setEmergencyActive] = useState(false);
   const [user, setUser] = useState(null);
-   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [buttonDisabled, setButtonDisabled] = useState(false);
+  const [loading, setLoading] = useState(false);
+
   const dropdownRef = useRef(null);
   const navigate = useNavigate();
 
@@ -19,7 +22,8 @@ function HomePage() {
 
   const handleEmergencyClick = async () => {
   setEmergencyActive(true);
-
+    setButtonDisabled(true); // Disable button
+  setLoading(true);   
   try {
     const token = localStorage.getItem("token");
     if (token) {
@@ -121,13 +125,25 @@ function HomePage() {
   } catch (err) {
     console.error("Emergency call failed:", err);
   }
-
-  setTimeout(() => setEmergencyActive(false), 3000);
+  // ✅ After completion
+  setLoading(false);
+  alert("🚨 Emergency service alerted!"); // Popup message
+setTimeout(() => {
+  
+    setEmergencyActive(false);
+  }, 1000);
+  // Re-enable button after 5 seconds
+  setTimeout(() => {
+    setButtonDisabled(false);
+    setEmergencyActive(false);
+  }, 5000);
+  
 };
 
 const handleServiceEmergency = async (emergencyType) => {
   setEmergencyActive(true);
-  
+  setButtonDisabled(true); // Disable button
+  setLoading(true);   
   try {
     const token = localStorage.getItem("token");
     if (token) {
@@ -282,7 +298,7 @@ const handleServiceEmergency = async (emergencyType) => {
               // Fallback for direct window navigation
               window.location.href = '/chat';
             }
-          }, 2000); // 2 second delay to show emergency alert first
+          }, 500); // 2 second delay to show emergency alert first
           
         } else {
           console.error("Failed to send emergency message to chat:", chatData);
@@ -294,8 +310,16 @@ const handleServiceEmergency = async (emergencyType) => {
   } catch (err) {
     console.error(`${emergencyType} emergency call failed:`, err);
   }
+  // ✅ After completion
+  setLoading(false);
+  alert("🚨 Emergency service alerted!"); // Popup message
 
-  setTimeout(() => setEmergencyActive(false), 3000);
+  // Re-enable button after 5 seconds
+  setTimeout(() => {
+    setButtonDisabled(false);
+    
+  }, 5000);
+  
 };
 
 // Individual handlers for each service type
@@ -452,12 +476,13 @@ const handleAccidentEmergency = () => {
             <h2>Emergency Panic Button</h2>
             <p className="section-subtitle">Press and hold for immediate emergency assistance</p>
             
-            <button 
-              onClick={handleEmergencyClick}
-              className={`panic-button ${emergencyActive ? 'active' : ''}`}
-            >
-              ⚠️ {emergencyActive ? 'EMERGENCY ACTIVATED' : 'EMERGENCY'}
-            </button>
+            <button
+  onClick={handleEmergencyClick}
+  className={`panic-button ${emergencyActive ? 'active' : ''}`}
+  disabled={buttonDisabled} // Disable while processing
+>
+  {loading ? "⏳ Processing..." : (emergencyActive ? "EMERGENCY ACTIVATED" : "EMERGENCY")}
+</button>
             
             <p className="panic-button-info">
               {emergencyActive 
@@ -478,9 +503,13 @@ const handleAccidentEmergency = () => {
       <div className="service-icon police-icon">🛡️</div>
       <h4>Police</h4>
       <p>Criminal activity, theft, violence, suspicious behavior</p>
-      <button className="service-btn police-btn" onClick={handlePoliceEmergency}>
-        Need Police Assistance
-      </button>
+      <button
+  className="service-btn police-btn"
+  onClick={handlePoliceEmergency}
+  disabled={buttonDisabled}
+>
+  {loading ? "⏳ Processing..." : "Need Police Assistance"}
+</button>
     </div>
 
     {/* Medical */}
@@ -488,8 +517,8 @@ const handleAccidentEmergency = () => {
       <div className="service-icon medical-icon">❤️</div>
       <h4>Medical</h4>
       <p>Injuries, illness, cardiac events, breathing problems</p>
-      <button className="service-btn medical-btn" onClick={handleMedicalEmergency}>
-        Need Medical Assistance
+      <button className="service-btn medical-btn" onClick={handleMedicalEmergency}disabled={buttonDisabled}>
+       {loading ? "⏳ Processing..." : "Need Medical Assistance"}
       </button>
     </div>
 
@@ -498,8 +527,8 @@ const handleAccidentEmergency = () => {
       <div className="service-icon fire-icon">🔥</div>
       <h4>Fire</h4>
       <p>Fire, smoke, gas leaks, hazardous materials</p>
-      <button className="service-btn fire-btn" onClick={handleFireEmergency}>
-        Need Fire Assistance
+      <button className="service-btn fire-btn" onClick={handleFireEmergency}disabled={buttonDisabled}>
+       {loading ? "⏳ Processing..." : "Need Fire Assistance"}
       </button>
     </div>
 
@@ -508,8 +537,8 @@ const handleAccidentEmergency = () => {
       <div className="service-icon accident-icon">🚗</div>
       <h4>Accident</h4>
       <p>Vehicle accidents, collisions, traffic incidents</p>
-      <button className="service-btn accident-btn" onClick={handleAccidentEmergency}>
-        Call Accident
+      <button className="service-btn accident-btn" onClick={handleAccidentEmergency}disabled={buttonDisabled}>
+       {loading ? "⏳ Processing..." : "Call Accident"}
       </button>
     </div>
   </div>
@@ -521,7 +550,7 @@ const handleAccidentEmergency = () => {
               <div className="additional-card">
                 <div className="additional-header">
                   <span className="additional-icon">📍</span>
-                  <h4>Live Location</h4>
+                  <h4>Location</h4>
                 </div>
                 <p>Real-time GPS tracking and location sharing with emergency responders</p>
                 <button className="additional-link" onClick={handleEnableLocation}>Enable Location →</button>
@@ -553,7 +582,7 @@ const handleAccidentEmergency = () => {
             <div className="quick-actions-grid">
               <button className="quick-action-btn" onClick={handleReportEmergency}>📱 Report Emergency</button>
               <button className="quick-action-btn" onClick={handleLiveUpdates}>📊 Live Updates</button>
-              <button className="quick-action-btn" onClick={handleSettings}>⚙️ Settings</button>
+              
             </div>
           </section>
         </div>

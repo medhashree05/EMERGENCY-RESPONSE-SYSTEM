@@ -7,7 +7,7 @@ const twilio = require('twilio')
 const crypto = require('crypto')
 const { createClient } = require('@supabase/supabase-js')
 const jwt = require('jsonwebtoken')
-const Groq = require('groq-sdk') // 👈 Import Groq SDK
+const Groq = require('groq-sdk') 
 const multer = require('multer')
 const fs = require('fs')
 const path = require('path')
@@ -196,8 +196,7 @@ function cleanOldSessions() {
 // Clean sessions every 30 minutes
 setInterval(cleanOldSessions, 30 * 60 * 1000)
 
-// Enhanced chat endpoint
-// Enhanced chat endpoint with location integration
+// Enhanced chat endpoint with nearby services integration
 app.post('/chat', async (req, res) => {
   try {
     const { message, sessionId } = req.body
@@ -221,40 +220,108 @@ app.post('/chat', async (req, res) => {
 
     // Keep only last 20 messages (10 back-and-forth) to manage token limits
     if (session.messages.length > 21) {
-      // +1 for system message
       session.messages = [
         session.messages[0], // Keep system message
         ...session.messages.slice(-20), // Keep last 20 user/assistant messages
       ]
     }
 
-    // Check for location-related requests
-    const locationKeywords = [
-      'location',
-      'coordinates',
-      'where am i',
-      'my location',
-      'track me',
-      'store my location',
-      'update location',
-      'save location',
-      'gps',
-      'latitude',
-      'longitude',
-      'position',
-      'address',
+    // 🆕 Enhanced keyword detection for nearby services
+    const nearbyServiceKeywords = [
+      'nearby', 'near me', 'closest', 'nearest', 'find hospital', 'find police', 
+      'find fire station', 'emergency services', 'where is', 'locate', 'around me',
+      'services near', 'emergency contacts', 'help center', 'rescue services',
+      'ambulance service', 'medical center', 'police station', 'fire department'
     ]
 
-    const isLocationRequest = locationKeywords.some((keyword) =>
-      message.toLowerCase().includes(keyword)
+    const locationKeywords = [
+      'location', 'coordinates', 'where am i', 'my location', 'track me', 
+      'store my location', 'update location', 'save location', 'gps', 
+      'latitude', 'longitude', 'position', 'address'
+    ]
+
+    const isNearbyServiceRequest = nearbyServiceKeywords.some(keyword => 
+      message.toLowerCase().includes(keyword.toLowerCase())
     )
 
-    // Enhanced system message for location requests
+    const isLocationRequest = locationKeywords.some(keyword =>
+      message.toLowerCase().includes(keyword.toLowerCase())
+    )
+
+    let nearbyServicesData = null
+    let userLocation = null
+
+    // 🆕 Handle nearby services requests
+    if (isNearbyServiceRequest && token) {
+      try {
+        // Get user's location from database
+        const decoded = jwt.verify(token, process.env.JWT_SECRET)
+        const userId = decoded.user_id
+
+        const { data: user, error } = await supabase
+          .from('users')
+          .select('latitude, longitude, first_name')
+          .eq('id', userId)
+          .single()
+
+        if (user && user.latitude && user.longitude) {
+          userLocation = {
+            latitude: user.latitude,
+            longitude: user.longitude
+          }
+
+          // Determine emergency type from message context
+          let emergencyType = 'General Emergency'
+          const messageText = message.toLowerCase()
+          
+          if (messageText.includes('police') || messageText.includes('crime') || messageText.includes('theft')) {
+            emergencyType = 'Police Emergency'
+          } else if (messageText.includes('medical') || messageText.includes('hospital') || messageText.includes('ambulance')) {
+            emergencyType = 'Medical Emergency'
+          } else if (messageText.includes('fire') || messageText.includes('burn')) {
+            emergencyType = 'Fire Emergency'
+          } else if (messageText.includes('accident') || messageText.includes('crash')) {
+            emergencyType = 'Accident Emergency'
+          }
+
+          console.log(`🔍 Fetching nearby services for: ${emergencyType} at ${user.latitude}, ${user.longitude}`)
+
+          // Call nearby services endpoint internally
+          const nearbyServicesResponse = await fetch('http://localhost:8000/admin/nearby-services', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              latitude: user.latitude,
+              longitude: user.longitude,
+              emergencyType: emergencyType,
+              location: `${user.latitude}, ${user.longitude}`
+            })
+          })
+
+          if (nearbyServicesResponse.ok) {
+            nearbyServicesData = await nearbyServicesResponse.json()
+            console.log(`✅ Found ${nearbyServicesData.services?.length || 0} nearby services`)
+          } else {
+            console.error('❌ Failed to fetch nearby services:', nearbyServicesResponse.statusText)
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching nearby services:', error)
+      }
+    }
+
+    // 🆕 Enhanced system message based on request type
     let systemMessage = session.messages[0].content
-    if (isLocationRequest) {
+
+    if (isNearbyServiceRequest) {
+      systemMessage += `\n\nThe user is asking about nearby emergency services. You have access to real-time nearby service data${nearbyServicesData ? ' which has been provided' : ', but user location may not be available'}. Help them find appropriate emergency services, provide contact information, and guide them on next steps. Always prioritize their safety and remind them to call emergency numbers (100, 101, 108) for immediate life-threatening situations.`
+    } else if (isLocationRequest) {
       systemMessage += `\n\nThe user is asking about location services. You can:
 1. Help them enable location tracking
-2. Guide them on sharing location with emergency contacts
+2. Guide them on sharing location with emergency contacts  
 3. Explain how to save important locations
 4. Assist with location-based emergency features
 If they want to update their location, ask them to either:
@@ -269,33 +336,44 @@ If they want to update their location, ask them to either:
       ...session.messages.slice(1),
     ]
 
+    // 🆕 Add nearby services data to the conversation context if available
+    if (nearbyServicesData && nearbyServicesData.services && nearbyServicesData.services.length > 0) {
+      const servicesContext = formatNearbyServicesForAI(nearbyServicesData)
+      messagesForAPI.push({
+        role: 'system',
+        content: `NEARBY EMERGENCY SERVICES DATA:\n${servicesContext}\n\nUse this information to help the user with specific service recommendations, contact details, and distances.`
+      })
+    }
+
     // Send conversation to Groq
     const completion = await groq.chat.completions.create({
       messages: messagesForAPI,
       model: 'llama-3.1-8b-instant',
-      max_tokens: 500,
+      max_tokens: 800, // Increased for service listings
       temperature: 0.7,
     })
 
-    let reply =
-      completion.choices[0]?.message?.content ||
-      'Sorry, I could not generate a response.'
+    let reply = completion.choices[0]?.message?.content || 'Sorry, I could not generate a response.'
 
-    // If location request detected and user is authenticated
+    // 🆕 Enhanced reply formatting for nearby services
+    if (nearbyServicesData && nearbyServicesData.services && nearbyServicesData.services.length > 0) {
+      reply += '\n\n📍 **NEARBY EMERGENCY SERVICES:**\n' + formatNearbyServicesDisplay(nearbyServicesData)
+    } else if (isNearbyServiceRequest && !userLocation) {
+      reply += '\n\n⚠️ **Location Required**: To show nearby services, please:\n1. Enable location sharing in your browser\n2. Use the "Store my current location" button\n3. Or provide your coordinates/address in the chat'
+    }
+
+    // Handle location coordinate detection and storage (existing functionality)
     if (isLocationRequest && token) {
       try {
-        // Verify user token
         const decoded = jwt.verify(token, process.env.JWT_SECRET)
         const userId = decoded.id
 
-        // Check if message contains coordinates
         const coordinatePattern = /(-?\d+\.?\d*),\s*(-?\d+\.?\d*)/
         const coordinateMatch = message.match(coordinatePattern)
 
         if (coordinateMatch) {
           const [, latitude, longitude] = coordinateMatch
 
-          // Store coordinates in user table
           await supabase
             .from('users')
             .update({
@@ -305,10 +383,8 @@ If they want to update their location, ask them to either:
             })
             .eq('id', userId)
 
-          reply +=
-            '\n\n✅ Your location coordinates have been saved to your profile for emergency services.'
+          reply += '\n\n✅ Your location coordinates have been saved to your profile for emergency services.'
         } else {
-          // Add instructions for location sharing
           reply += `\n\n📍 To store your location:
 1. Go to the Location page to enable GPS tracking
 2. Share coordinates in format: "latitude, longitude" (e.g., "40.7128, -74.0060")
@@ -322,17 +398,114 @@ If they want to update their location, ask them to either:
     // Add AI response to session
     session.messages.push({ role: 'assistant', content: reply })
 
-    res.json({
+    // 🆕 Enhanced response data
+    const responseData = {
       reply,
       sessionId: currentSessionId,
       messageCount: session.messages.length - 1,
       locationDetected: isLocationRequest,
-    })
+      nearbyServicesDetected: isNearbyServiceRequest,
+      userLocation: userLocation
+    }
+
+    // Add nearby services data to response if available
+    if (nearbyServicesData) {
+      responseData.nearbyServices = nearbyServicesData.services
+      responseData.servicesByType = nearbyServicesData.servicesByType
+    }
+
+    res.json(responseData)
+
   } catch (err) {
     console.error('Chat error:', err)
     res.status(500).json({ error: 'Failed to get response' })
   }
 })
+
+// 🆕 Helper function to format nearby services data for AI context
+function formatNearbyServicesForAI(servicesData) {
+  if (!servicesData.services || servicesData.services.length === 0) {
+    return 'No nearby services found.'
+  }
+
+  let formattedText = `Emergency Type: ${servicesData.emergencyType}\n`
+  formattedText += `Search Location: ${servicesData.searchLocation.latitude}, ${servicesData.searchLocation.longitude}\n\n`
+
+  // Group by service type
+  const servicesByType = {}
+  servicesData.services.forEach(service => {
+    if (!servicesByType[service.serviceType]) {
+      servicesByType[service.serviceType] = []
+    }
+    servicesByType[service.serviceType].push(service)
+  })
+
+  Object.entries(servicesByType).forEach(([type, services]) => {
+    formattedText += `${type.toUpperCase().replace('_', ' ')} SERVICES:\n`
+    services.slice(0, 3).forEach((service, index) => { // Limit to top 3 per type
+      formattedText += `${index + 1}. ${service.name}\n`
+      formattedText += `   Phone: ${service.phone}\n`
+      formattedText += `   Address: ${service.address}\n`
+      formattedText += `   Distance: ${service.distance}km\n`
+      if (service.isOpen !== null) {
+        formattedText += `   Status: ${service.isOpen ? 'Open' : 'Closed/Unknown'}\n`
+      }
+      formattedText += '\n'
+    })
+  })
+
+  return formattedText
+}
+
+// 🆕 Helper function to format nearby services for user display
+function formatNearbyServicesDisplay(servicesData) {
+  if (!servicesData.services || servicesData.services.length === 0) {
+    return '❌ No nearby services found. Please check your location settings.'
+  }
+
+  let displayText = ''
+  
+  // Group by service type for better organization
+  const servicesByType = {}
+  servicesData.services.forEach(service => {
+    if (!servicesByType[service.serviceType]) {
+      servicesByType[service.serviceType] = []
+    }
+    servicesByType[service.serviceType].push(service)
+  })
+
+  // Service type icons
+  const typeIcons = {
+    'hospital': '🏥',
+    'police': '👮',
+    'fire_station': '🚒'
+  }
+
+  Object.entries(servicesByType).forEach(([type, services]) => {
+    const icon = typeIcons[type] || '📍'
+    const typeName = type.replace('_', ' ').toUpperCase()
+    
+    displayText += `\n${icon} **${typeName}:**\n`
+    
+    services.slice(0, 3).forEach((service, index) => {
+      displayText += `${index + 1}. **${service.name}**\n`
+      displayText += `   📞 ${service.phone}\n`
+      displayText += `   📍 ${service.address}\n`
+      displayText += `   📏 ${service.distance}km away\n`
+      if (service.emergency) {
+        displayText += `   🚨 Emergency Service\n`
+      }
+      displayText += '\n'
+    })
+  })
+
+  displayText += '\n⚠️ **For immediate life-threatening emergencies, call:**\n'
+  displayText += '• Police: 100\n'
+  displayText += '• Fire: 101\n' 
+  displayText += '• Medical: 108\n'
+
+  return displayText
+}
 
 // New endpoint to store location from chat
 app.post('/chat/store-location', async (req, res) => {

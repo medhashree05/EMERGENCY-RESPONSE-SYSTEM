@@ -3,9 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 import './Login.css'
 
-// If you have a context for user state, import it here
-// import { AuthContext } from '../context/AuthContext'
-// import { UserContext } from '../context/UserContext'
+
 
 function Login() {
   const [formData, setFormData] = useState({
@@ -16,9 +14,7 @@ function Login() {
   })
   const navigate = useNavigate()
 
-  // If you have context, uncomment these:
-  // const { setUser, setIsAuthenticated } = useContext(AuthContext)
-  // const { updateUserData } = useContext(UserContext)
+  
 
   const [errors, setErrors] = useState({})
   const [isLoading, setIsLoading] = useState(false)
@@ -69,10 +65,7 @@ function Login() {
       localStorage.setItem('userType', userType)
       localStorage.setItem('isAuthenticated', 'true')
 
-      // If you have context providers, update them here:
-      // setUser(userData)
-      // setIsAuthenticated(true)
-      // updateUserData(userData)
+    
 
       // Trigger a custom event that other parts of your app can listen to
       window.dispatchEvent(new CustomEvent('userLogin', {
@@ -155,10 +148,10 @@ function Login() {
           navigate('/', { replace: true })
         }
 
-        // Alternative: Force a page reload after navigation (if other solutions don't work)
-        // setTimeout(() => {
-        //   window.location.reload()
-        // }, 100)
+      
+         setTimeout(() => {
+          window.location.reload()
+         }, 100)
 
       } else {
         console.error('❌ Login failed:', data)
@@ -358,11 +351,7 @@ function Login() {
                     </button>
                   )}
 
-                  {formData.userType === 'admin' && (
-                    <span className="admin-help-text">
-                      Contact super admin for password reset
-                    </span>
-                  )}
+                  
                 </div>
 
                 <button
