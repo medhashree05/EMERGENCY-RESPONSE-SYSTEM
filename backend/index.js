@@ -7,7 +7,7 @@ const twilio = require('twilio')
 const crypto = require('crypto')
 const { createClient } = require('@supabase/supabase-js')
 const jwt = require('jsonwebtoken')
-const Groq = require('groq-sdk') 
+const Groq = require('groq-sdk')
 const multer = require('multer')
 const fs = require('fs')
 const path = require('path')
@@ -228,23 +228,48 @@ app.post('/chat', async (req, res) => {
 
     // 🆕 Enhanced keyword detection for nearby services
     const nearbyServiceKeywords = [
-      'nearby', 'near me', 'closest', 'nearest', 'find hospital', 'find police', 
-      'find fire station', 'emergency services', 'where is', 'locate', 'around me',
-      'services near', 'emergency contacts', 'help center', 'rescue services',
-      'ambulance service', 'medical center', 'police station', 'fire department'
+      'nearby',
+      'near me',
+      'closest',
+      'nearest',
+      'find hospital',
+      'find police',
+      'find fire station',
+      'emergency services',
+      'where is',
+      'locate',
+      'around me',
+      'services near',
+      'emergency contacts',
+      'help center',
+      'rescue services',
+      'ambulance service',
+      'medical center',
+      'police station',
+      'fire department',
     ]
 
     const locationKeywords = [
-      'location', 'coordinates', 'where am i', 'my location', 'track me', 
-      'store my location', 'update location', 'save location', 'gps', 
-      'latitude', 'longitude', 'position', 'address'
+      'location',
+      'coordinates',
+      'where am i',
+      'my location',
+      'track me',
+      'store my location',
+      'update location',
+      'save location',
+      'gps',
+      'latitude',
+      'longitude',
+      'position',
+      'address',
     ]
 
-    const isNearbyServiceRequest = nearbyServiceKeywords.some(keyword => 
+    const isNearbyServiceRequest = nearbyServiceKeywords.some((keyword) =>
       message.toLowerCase().includes(keyword.toLowerCase())
     )
 
-    const isLocationRequest = locationKeywords.some(keyword =>
+    const isLocationRequest = locationKeywords.some((keyword) =>
       message.toLowerCase().includes(keyword.toLowerCase())
     )
 
@@ -267,45 +292,71 @@ app.post('/chat', async (req, res) => {
         if (user && user.latitude && user.longitude) {
           userLocation = {
             latitude: user.latitude,
-            longitude: user.longitude
+            longitude: user.longitude,
           }
 
           // Determine emergency type from message context
           let emergencyType = 'General Emergency'
           const messageText = message.toLowerCase()
-          
-          if (messageText.includes('police') || messageText.includes('crime') || messageText.includes('theft')) {
+
+          if (
+            messageText.includes('police') ||
+            messageText.includes('crime') ||
+            messageText.includes('theft')
+          ) {
             emergencyType = 'Police Emergency'
-          } else if (messageText.includes('medical') || messageText.includes('hospital') || messageText.includes('ambulance')) {
+          } else if (
+            messageText.includes('medical') ||
+            messageText.includes('hospital') ||
+            messageText.includes('ambulance')
+          ) {
             emergencyType = 'Medical Emergency'
-          } else if (messageText.includes('fire') || messageText.includes('burn')) {
+          } else if (
+            messageText.includes('fire') ||
+            messageText.includes('burn')
+          ) {
             emergencyType = 'Fire Emergency'
-          } else if (messageText.includes('accident') || messageText.includes('crash')) {
+          } else if (
+            messageText.includes('accident') ||
+            messageText.includes('crash')
+          ) {
             emergencyType = 'Accident Emergency'
           }
 
-          console.log(`🔍 Fetching nearby services for: ${emergencyType} at ${user.latitude}, ${user.longitude}`)
+          console.log(
+            `🔍 Fetching nearby services for: ${emergencyType} at ${user.latitude}, ${user.longitude}`
+          )
 
           // Call nearby services endpoint internally
-          const nearbyServicesResponse = await fetch('http://localhost:8000/admin/nearby-services', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({
-              latitude: user.latitude,
-              longitude: user.longitude,
-              emergencyType: emergencyType,
-              location: `${user.latitude}, ${user.longitude}`
-            })
-          })
+          const nearbyServicesResponse = await fetch(
+            'http://localhost:8000/admin/nearby-services',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                latitude: user.latitude,
+                longitude: user.longitude,
+                emergencyType: emergencyType,
+                location: `${user.latitude}, ${user.longitude}`,
+              }),
+            }
+          )
 
           if (nearbyServicesResponse.ok) {
             nearbyServicesData = await nearbyServicesResponse.json()
-            console.log(`✅ Found ${nearbyServicesData.services?.length || 0} nearby services`)
+            console.log(
+              `✅ Found ${
+                nearbyServicesData.services?.length || 0
+              } nearby services`
+            )
           } else {
-            console.error('❌ Failed to fetch nearby services:', nearbyServicesResponse.statusText)
+            console.error(
+              '❌ Failed to fetch nearby services:',
+              nearbyServicesResponse.statusText
+            )
           }
         }
       } catch (error) {
@@ -317,7 +368,11 @@ app.post('/chat', async (req, res) => {
     let systemMessage = session.messages[0].content
 
     if (isNearbyServiceRequest) {
-      systemMessage += `\n\nThe user is asking about nearby emergency services. You have access to real-time nearby service data${nearbyServicesData ? ' which has been provided' : ', but user location may not be available'}. Help them find appropriate emergency services, provide contact information, and guide them on next steps. Always prioritize their safety and remind them to call emergency numbers (100, 101, 108) for immediate life-threatening situations.`
+      systemMessage += `\n\nThe user is asking about nearby emergency services. You have access to real-time nearby service data${
+        nearbyServicesData
+          ? ' which has been provided'
+          : ', but user location may not be available'
+      }. Help them find appropriate emergency services, provide contact information, and guide them on next steps. Always prioritize their safety and remind them to call emergency numbers (100, 101, 108) for immediate life-threatening situations.`
     } else if (isLocationRequest) {
       systemMessage += `\n\nThe user is asking about location services. You can:
 1. Help them enable location tracking
@@ -337,11 +392,15 @@ If they want to update their location, ask them to either:
     ]
 
     // 🆕 Add nearby services data to the conversation context if available
-    if (nearbyServicesData && nearbyServicesData.services && nearbyServicesData.services.length > 0) {
+    if (
+      nearbyServicesData &&
+      nearbyServicesData.services &&
+      nearbyServicesData.services.length > 0
+    ) {
       const servicesContext = formatNearbyServicesForAI(nearbyServicesData)
       messagesForAPI.push({
         role: 'system',
-        content: `NEARBY EMERGENCY SERVICES DATA:\n${servicesContext}\n\nUse this information to help the user with specific service recommendations, contact details, and distances.`
+        content: `NEARBY EMERGENCY SERVICES DATA:\n${servicesContext}\n\nUse this information to help the user with specific service recommendations, contact details, and distances.`,
       })
     }
 
@@ -353,13 +412,22 @@ If they want to update their location, ask them to either:
       temperature: 0.7,
     })
 
-    let reply = completion.choices[0]?.message?.content || 'Sorry, I could not generate a response.'
+    let reply =
+      completion.choices[0]?.message?.content ||
+      'Sorry, I could not generate a response.'
 
     // 🆕 Enhanced reply formatting for nearby services
-    if (nearbyServicesData && nearbyServicesData.services && nearbyServicesData.services.length > 0) {
-      reply += '\n\n📍 **NEARBY EMERGENCY SERVICES:**\n' + formatNearbyServicesDisplay(nearbyServicesData)
+    if (
+      nearbyServicesData &&
+      nearbyServicesData.services &&
+      nearbyServicesData.services.length > 0
+    ) {
+      reply +=
+        '\n\n📍 **NEARBY EMERGENCY SERVICES:**\n' +
+        formatNearbyServicesDisplay(nearbyServicesData)
     } else if (isNearbyServiceRequest && !userLocation) {
-      reply += '\n\n⚠️ **Location Required**: To show nearby services, please:\n1. Enable location sharing in your browser\n2. Use the "Store my current location" button\n3. Or provide your coordinates/address in the chat'
+      reply +=
+        '\n\n⚠️ **Location Required**: To show nearby services, please:\n1. Enable location sharing in your browser\n2. Use the "Store my current location" button\n3. Or provide your coordinates/address in the chat'
     }
 
     // Handle location coordinate detection and storage (existing functionality)
@@ -383,7 +451,8 @@ If they want to update their location, ask them to either:
             })
             .eq('id', userId)
 
-          reply += '\n\n✅ Your location coordinates have been saved to your profile for emergency services.'
+          reply +=
+            '\n\n✅ Your location coordinates have been saved to your profile for emergency services.'
         } else {
           reply += `\n\n📍 To store your location:
 1. Go to the Location page to enable GPS tracking
@@ -405,7 +474,7 @@ If they want to update their location, ask them to either:
       messageCount: session.messages.length - 1,
       locationDetected: isLocationRequest,
       nearbyServicesDetected: isNearbyServiceRequest,
-      userLocation: userLocation
+      userLocation: userLocation,
     }
 
     // Add nearby services data to response if available
@@ -415,7 +484,6 @@ If they want to update their location, ask them to either:
     }
 
     res.json(responseData)
-
   } catch (err) {
     console.error('Chat error:', err)
     res.status(500).json({ error: 'Failed to get response' })
@@ -433,7 +501,7 @@ function formatNearbyServicesForAI(servicesData) {
 
   // Group by service type
   const servicesByType = {}
-  servicesData.services.forEach(service => {
+  servicesData.services.forEach((service) => {
     if (!servicesByType[service.serviceType]) {
       servicesByType[service.serviceType] = []
     }
@@ -442,13 +510,16 @@ function formatNearbyServicesForAI(servicesData) {
 
   Object.entries(servicesByType).forEach(([type, services]) => {
     formattedText += `${type.toUpperCase().replace('_', ' ')} SERVICES:\n`
-    services.slice(0, 3).forEach((service, index) => { // Limit to top 3 per type
+    services.slice(0, 3).forEach((service, index) => {
+      // Limit to top 3 per type
       formattedText += `${index + 1}. ${service.name}\n`
       formattedText += `   Phone: ${service.phone}\n`
       formattedText += `   Address: ${service.address}\n`
       formattedText += `   Distance: ${service.distance}km\n`
       if (service.isOpen !== null) {
-        formattedText += `   Status: ${service.isOpen ? 'Open' : 'Closed/Unknown'}\n`
+        formattedText += `   Status: ${
+          service.isOpen ? 'Open' : 'Closed/Unknown'
+        }\n`
       }
       formattedText += '\n'
     })
@@ -464,10 +535,10 @@ function formatNearbyServicesDisplay(servicesData) {
   }
 
   let displayText = ''
-  
+
   // Group by service type for better organization
   const servicesByType = {}
-  servicesData.services.forEach(service => {
+  servicesData.services.forEach((service) => {
     if (!servicesByType[service.serviceType]) {
       servicesByType[service.serviceType] = []
     }
@@ -476,17 +547,17 @@ function formatNearbyServicesDisplay(servicesData) {
 
   // Service type icons
   const typeIcons = {
-    'hospital': '🏥',
-    'police': '👮',
-    'fire_station': '🚒'
+    hospital: '🏥',
+    police: '👮',
+    fire_station: '🚒',
   }
 
   Object.entries(servicesByType).forEach(([type, services]) => {
     const icon = typeIcons[type] || '📍'
     const typeName = type.replace('_', ' ').toUpperCase()
-    
+
     displayText += `\n${icon} **${typeName}:**\n`
-    
+
     services.slice(0, 3).forEach((service, index) => {
       displayText += `${index + 1}. **${service.name}**\n`
       displayText += `   📞 ${service.phone}\n`
@@ -501,7 +572,7 @@ function formatNearbyServicesDisplay(servicesData) {
 
   displayText += '\n⚠️ **For immediate life-threatening emergencies, call:**\n'
   displayText += '• Police: 100\n'
-  displayText += '• Fire: 101\n' 
+  displayText += '• Fire: 101\n'
   displayText += '• Medical: 108\n'
 
   return displayText
@@ -1505,67 +1576,90 @@ app.post('/admin/nearby-services', authenticateAdmin, async (req, res) => {
     // Parse coordinates from location string if needed
     if (!latitude && !longitude && location && typeof location === 'string') {
       console.log('Parsing coordinates from location string:', location)
-      
+
       const locationParts = location.split(',')
       if (locationParts.length === 2) {
         const lat = parseFloat(locationParts[0].trim())
         const lng = parseFloat(locationParts[1].trim())
-        
-        if (!isNaN(lat) && !isNaN(lng) && 
-            lat >= -90 && lat <= 90 && 
-            lng >= -180 && lng <= 180) {
+
+        if (
+          !isNaN(lat) &&
+          !isNaN(lng) &&
+          lat >= -90 &&
+          lat <= 90 &&
+          lng >= -180 &&
+          lng <= 180
+        ) {
           latitude = lat
           longitude = lng
-          console.log('Successfully parsed coordinates:', { latitude, longitude })
+          console.log('Successfully parsed coordinates:', {
+            latitude,
+            longitude,
+          })
         }
       }
     }
 
     // Validation
     if (!latitude || !longitude || !emergencyType) {
-      return res.status(400).json({ 
-        error: 'Missing required parameters: latitude, longitude, emergencyType' 
+      return res.status(400).json({
+        error:
+          'Missing required parameters: latitude, longitude, emergencyType',
       })
     }
 
     // Enhanced service type mapping for multi-dispatch
     const getRequiredServiceTypes = (emergencyType) => {
       const type = emergencyType.toLowerCase()
-      
+
       if (type.includes('fire')) {
         return ['fire_station', 'hospital', 'police'] // Fire emergencies need all services
       }
-      
+
       if (type.includes('accident')) {
         return ['police', 'hospital'] // Accidents need police and medical
       }
-      
-      if (type.includes('police') || type.includes('crime') || type.includes('theft') || 
-          type.includes('violence') || type.includes('assault') || type.includes('robbery')) {
+
+      if (
+        type.includes('police') ||
+        type.includes('crime') ||
+        type.includes('theft') ||
+        type.includes('violence') ||
+        type.includes('assault') ||
+        type.includes('robbery')
+      ) {
         return ['police']
       }
-      
-      if (type.includes('medical') || type.includes('health') || type.includes('injury') || 
-          type.includes('heart')) {
+
+      if (
+        type.includes('medical') ||
+        type.includes('health') ||
+        type.includes('injury') ||
+        type.includes('heart')
+      ) {
         return ['hospital']
       }
-      
+
       // For general emergencies, return all service types
       return ['hospital', 'police', 'fire_station']
     }
 
     const requiredServiceTypes = getRequiredServiceTypes(emergencyType)
-    console.log(`Emergency type: "${emergencyType}" requires services: ${requiredServiceTypes.join(', ')}`)
+    console.log(
+      `Emergency type: "${emergencyType}" requires services: ${requiredServiceTypes.join(
+        ', '
+      )}`
+    )
 
     // Search radius in meters (10km)
     const searchRadius = 10000
-    
+
     // Collect all services for all required types
     const allServices = []
 
     for (const serviceType of requiredServiceTypes) {
       console.log(`Searching for ${serviceType} services...`)
-      
+
       // Build Overpass API query for this service type
       const overpassQuery = `
         [out:json][timeout:25];
@@ -1584,17 +1678,19 @@ app.post('/admin/nearby-services', authenticateAdmin, async (req, res) => {
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
           },
-          body: `data=${encodeURIComponent(overpassQuery)}`
+          body: `data=${encodeURIComponent(overpassQuery)}`,
         })
 
         if (response.ok) {
           const data = await response.json()
-          console.log(`Found ${data.elements?.length || 0} ${serviceType} results`)
+          console.log(
+            `Found ${data.elements?.length || 0} ${serviceType} results`
+          )
 
           // Process and format results for this service type
           const services = (data.elements || [])
-            .filter(element => element.tags && element.tags.name)
-            .map(element => {
+            .filter((element) => element.tags && element.tags.name)
+            .map((element) => {
               let lat, lon
               if (element.lat && element.lon) {
                 lat = element.lat
@@ -1607,23 +1703,29 @@ app.post('/admin/nearby-services', authenticateAdmin, async (req, res) => {
               }
 
               const distance = calculateDistance(latitude, longitude, lat, lon)
-              
+
               return {
                 id: `${serviceType}_${element.id}`,
                 name: element.tags.name,
                 address: buildAddress(element.tags),
-                phone: element.tags.phone || element.tags['contact:phone'] || 'Contact information not available',
+                phone:
+                  element.tags.phone ||
+                  element.tags['contact:phone'] ||
+                  'Contact information not available',
                 distance: distance,
                 location: { lat, lng: lon },
                 rating: 'N/A',
                 isOpen: parseOpeningHours(element.tags.opening_hours),
                 serviceType: serviceType, // Add service type for categorization
                 types: [serviceType],
-                website: element.tags.website || element.tags['contact:website'] || null,
-                emergency: element.tags.emergency === 'yes'
+                website:
+                  element.tags.website ||
+                  element.tags['contact:website'] ||
+                  null,
+                emergency: element.tags.emergency === 'yes',
               }
             })
-            .filter(service => service !== null)
+            .filter((service) => service !== null)
             .sort((a, b) => a.distance - b.distance)
             .slice(0, 5) // Top 5 for each service type
 
@@ -1636,13 +1738,17 @@ app.post('/admin/nearby-services', authenticateAdmin, async (req, res) => {
 
     // Add fallback services if no services found
     if (allServices.length === 0) {
-      const fallbackServices = getFallbackEmergencyServices(latitude, longitude, requiredServiceTypes)
+      const fallbackServices = getFallbackEmergencyServices(
+        latitude,
+        longitude,
+        requiredServiceTypes
+      )
       allServices.push(...fallbackServices)
     }
 
     // Group services by type for better frontend handling
     const servicesByType = {}
-    allServices.forEach(service => {
+    allServices.forEach((service) => {
       if (!servicesByType[service.serviceType]) {
         servicesByType[service.serviceType] = []
       }
@@ -1650,7 +1756,9 @@ app.post('/admin/nearby-services', authenticateAdmin, async (req, res) => {
     })
 
     console.log(`Total processed services: ${allServices.length}`)
-    console.log(`Service types found: ${Object.keys(servicesByType).join(', ')}`)
+    console.log(
+      `Service types found: ${Object.keys(servicesByType).join(', ')}`
+    )
 
     res.json({
       success: true,
@@ -1660,38 +1768,47 @@ app.post('/admin/nearby-services', authenticateAdmin, async (req, res) => {
       emergencyType,
       searchLocation: { latitude, longitude },
       count: allServices.length,
-      source: 'OpenStreetMap'
+      source: 'OpenStreetMap',
     })
-
   } catch (error) {
     console.error('Error fetching nearby services:', error)
-    
+
     // Enhanced fallback for multi-service
     const requiredServiceTypes = ['hospital', 'police', 'fire_station']
-    const fallbackServices = getFallbackEmergencyServices(latitude, longitude, requiredServiceTypes)
-    
+    const fallbackServices = getFallbackEmergencyServices(
+      latitude,
+      longitude,
+      requiredServiceTypes
+    )
+
     res.json({
       success: true,
       services: fallbackServices,
       servicesByType: {
-        hospital: fallbackServices.filter(s => s.serviceType === 'hospital'),
-        police: fallbackServices.filter(s => s.serviceType === 'police'),
-        fire_station: fallbackServices.filter(s => s.serviceType === 'fire_station')
+        hospital: fallbackServices.filter((s) => s.serviceType === 'hospital'),
+        police: fallbackServices.filter((s) => s.serviceType === 'police'),
+        fire_station: fallbackServices.filter(
+          (s) => s.serviceType === 'fire_station'
+        ),
       },
       requiredServiceTypes: requiredServiceTypes,
       emergencyType,
       searchLocation: { latitude, longitude },
       count: fallbackServices.length,
       source: 'Fallback',
-      note: 'Using fallback emergency contacts due to service unavailability'
+      note: 'Using fallback emergency contacts due to service unavailability',
     })
   }
 })
 
 // Enhanced fallback function for multiple service types
-function getFallbackEmergencyServices(lat, lon, requiredServiceTypes = ['hospital', 'police', 'fire_station']) {
+function getFallbackEmergencyServices(
+  lat,
+  lon,
+  requiredServiceTypes = ['hospital', 'police', 'fire_station']
+) {
   const fallbackServices = []
-  
+
   if (requiredServiceTypes.includes('police')) {
     fallbackServices.push({
       id: 'emergency_police',
@@ -1704,10 +1821,10 @@ function getFallbackEmergencyServices(lat, lon, requiredServiceTypes = ['hospita
       isOpen: true,
       serviceType: 'police',
       types: ['emergency', 'police'],
-      emergency: true
+      emergency: true,
     })
   }
-  
+
   if (requiredServiceTypes.includes('fire_station')) {
     fallbackServices.push({
       id: 'emergency_fire',
@@ -1720,10 +1837,10 @@ function getFallbackEmergencyServices(lat, lon, requiredServiceTypes = ['hospita
       isOpen: true,
       serviceType: 'fire_station',
       types: ['emergency', 'fire_station'],
-      emergency: true
+      emergency: true,
     })
   }
-  
+
   if (requiredServiceTypes.includes('hospital')) {
     fallbackServices.push({
       id: 'emergency_medical',
@@ -1736,10 +1853,10 @@ function getFallbackEmergencyServices(lat, lon, requiredServiceTypes = ['hospita
       isOpen: true,
       serviceType: 'hospital',
       types: ['emergency', 'hospital'],
-      emergency: true
+      emergency: true,
     })
   }
-  
+
   return fallbackServices
 }
 
@@ -1747,12 +1864,20 @@ function getFallbackEmergencyServices(lat, lon, requiredServiceTypes = ['hospita
 app.post('/admin/dispatch-services', authenticateAdmin, async (req, res) => {
   try {
     const { emergencyId, services } = req.body // services is array of service objects
-    
-    console.log('Multi-dispatch request:', { emergencyId, serviceCount: services?.length })
-    
-    if (!emergencyId || !services || !Array.isArray(services) || services.length === 0) {
-      return res.status(400).json({ 
-        error: 'Emergency ID and services array are required' 
+
+    console.log('Multi-dispatch request:', {
+      emergencyId,
+      serviceCount: services?.length,
+    })
+
+    if (
+      !emergencyId ||
+      !services ||
+      !Array.isArray(services) ||
+      services.length === 0
+    ) {
+      return res.status(400).json({
+        error: 'Emergency ID and services array are required',
       })
     }
 
@@ -1775,14 +1900,16 @@ app.post('/admin/dispatch-services', authenticateAdmin, async (req, res) => {
       .eq('id', adminId)
       .single()
 
-    const adminName = adminData ? `${adminData.first_name} ${adminData.last_name}` : 'Unknown Admin'
+    const adminName = adminData
+      ? `${adminData.first_name} ${adminData.last_name}`
+      : 'Unknown Admin'
 
     // Prepare dispatch records
     const currentTime = new Date().toISOString()
     const dispatchedServices = []
     const dispatchHistory = currentEmergency.dispatch_history || []
 
-    services.forEach(service => {
+    services.forEach((service) => {
       const dispatchRecord = {
         service_name: service.name,
         service_type: service.serviceType,
@@ -1792,9 +1919,9 @@ app.post('/admin/dispatch-services', authenticateAdmin, async (req, res) => {
         admin_id: adminId,
         phone: service.phone,
         address: service.address,
-        distance: service.distance
+        distance: service.distance,
       }
-      
+
       dispatchedServices.push(dispatchRecord)
       dispatchHistory.push(dispatchRecord)
     })
@@ -1804,7 +1931,7 @@ app.post('/admin/dispatch-services', authenticateAdmin, async (req, res) => {
       status: 'responding',
       dispatched_services: dispatchedServices,
       dispatch_history: dispatchHistory,
-      updated_at: currentTime
+      updated_at: currentTime,
     }
 
     const { data: updatedData, error: updateError } = await supabase
@@ -1818,16 +1945,17 @@ app.post('/admin/dispatch-services', authenticateAdmin, async (req, res) => {
       return res.status(500).json({ error: 'Failed to dispatch services' })
     }
 
-    console.log(`Successfully dispatched ${services.length} services to emergency ${emergencyId}`)
+    console.log(
+      `Successfully dispatched ${services.length} services to emergency ${emergencyId}`
+    )
 
     res.json({
       success: true,
       message: `Successfully dispatched ${services.length} service(s)`,
       dispatchedServices: dispatchedServices,
       emergencyId: emergencyId,
-      updatedEmergency: updatedData[0]
+      updatedEmergency: updatedData[0],
     })
-
   } catch (error) {
     console.error('Multi-dispatch error:', error)
     res.status(500).json({ error: 'Failed to dispatch services' })
@@ -1837,22 +1965,24 @@ app.post('/admin/dispatch-services', authenticateAdmin, async (req, res) => {
 // Helper functions
 function buildAddress(tags) {
   const addressParts = []
-  
+
   if (tags['addr:housenumber']) addressParts.push(tags['addr:housenumber'])
   if (tags['addr:street']) addressParts.push(tags['addr:street'])
   if (tags['addr:city']) addressParts.push(tags['addr:city'])
   if (tags['addr:state']) addressParts.push(tags['addr:state'])
   if (tags['addr:postcode']) addressParts.push(tags['addr:postcode'])
-  
-  return addressParts.length > 0 ? addressParts.join(', ') : 'Address not available'
+
+  return addressParts.length > 0
+    ? addressParts.join(', ')
+    : 'Address not available'
 }
 
 function parseOpeningHours(openingHours) {
   if (!openingHours) return null
-  
+
   // Simple check for 24/7
   if (openingHours.includes('24/7')) return true
-  
+
   // For more complex parsing, you'd need a library like opening_hours.js
   // For now, return null (unknown)
   return null
@@ -1871,7 +2001,7 @@ function getFallbackEmergencyServices(lat, lon) {
       rating: 'N/A',
       isOpen: true,
       types: ['emergency', 'police'],
-      emergency: true
+      emergency: true,
     },
     {
       id: 'emergency_fire',
@@ -1883,7 +2013,7 @@ function getFallbackEmergencyServices(lat, lon) {
       rating: 'N/A',
       isOpen: true,
       types: ['emergency', 'fire_station'],
-      emergency: true
+      emergency: true,
     },
     {
       id: 'emergency_medical',
@@ -1895,8 +2025,8 @@ function getFallbackEmergencyServices(lat, lon) {
       rating: 'N/A',
       isOpen: true,
       types: ['emergency', 'hospital'],
-      emergency: true
-    }
+      emergency: true,
+    },
   ]
 }
 // Helper function for distance calculation
@@ -1904,19 +2034,20 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
   const R = 6371 // Earth's radius in km
   const dLat = deg2rad(lat2 - lat1)
   const dLon = deg2rad(lon2 - lon1)
-  const a = 
-    Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * 
-    
-    Math.sin(dLon/2) * Math.sin(dLon/2)
-  
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(deg2rad(lat1)) *
+      Math.cos(deg2rad(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2)
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
   const distance = R * c
   return Math.round(distance * 100) / 100 // Round to 2 decimal places
 }
 
 function deg2rad(deg) {
-  return deg * (Math.PI/180)
+  return deg * (Math.PI / 180)
 }
 // PUT /locations/:id - Update a saved location
 app.put('/locations/:id', authenticateToken, async (req, res) => {
@@ -2437,16 +2568,16 @@ app.post('/admin/decrypt-medical', authenticateAdmin, async (req, res) => {
 
     // Use your existing decrypt function from the backend
     const decryptedData = decrypt(encryptedData)
-    
-    res.json({ 
-      success: true, 
-      decryptedData: decryptedData || 'Unable to decrypt' 
+
+    res.json({
+      success: true,
+      decryptedData: decryptedData || 'Unable to decrypt',
     })
   } catch (error) {
     console.error('Decryption error:', error)
-    res.json({ 
-      success: false, 
-      decryptedData: 'Unable to decrypt medical information' 
+    res.json({
+      success: false,
+      decryptedData: 'Unable to decrypt medical information',
     })
   }
 })
@@ -2546,7 +2677,827 @@ app.post('/transcribe', upload.single('file'), async (req, res) => {
     res.status(500).json({ success: false, error: errorMessage })
   }
 })
+// ===========================================
+// DISPATCH UNIT AUTHENTICATION & MANAGEMENT
+// ===========================================
 
+// Temporary OTP store for dispatch units (Consider using Redis in production)
+const dispatchOtpStore = new Map()
+
+// Clean expired OTPs periodically
+setInterval(() => {
+  const now = Date.now()
+  for (const [phone, data] of dispatchOtpStore.entries()) {
+    if (now > data.expiresAt) {
+      dispatchOtpStore.delete(phone)
+    }
+  }
+}, 5 * 60 * 1000) // Clean every 5 minutes
+
+// ===========================================
+// VALIDATION UTILITIES
+// ===========================================
+
+// ===========================================
+// CORRECTED VALIDATION UTILITIES
+// ===========================================
+
+const dispatchValidation = {
+  // Fixed: Added max length check to match database constraint (50 chars)
+  validateUsername: (username) => {
+    const regex = /^(?=.*[a-zA-Z])[a-zA-Z0-9_-]{8,50}$/
+    return {
+      isValid: regex.test(username) && username.length <= 50,
+      message:
+        username?.length < 8
+          ? 'Username must be at least 8 characters long'
+          : username?.length > 50
+          ? 'Username must not exceed 50 characters'
+          : !regex.test(username)
+          ? 'Username must contain at least one letter and only use letters, numbers, underscores, or hyphens'
+          : null,
+    }
+  },
+
+  // Validate contact number
+  validateContactNumber: (contactNumber) => {
+    const cleaned = contactNumber?.toString().replace(/\D/g, '')
+    return {
+      isValid: cleaned?.length === 10,
+      cleaned: cleaned,
+      formatted: cleaned?.length === 10 ? `+91${cleaned}` : null,
+      message:
+        cleaned?.length !== 10
+          ? 'Contact number must be exactly 10 digits'
+          : null,
+    }
+  },
+
+  // Validate pincode
+  validatePincode: (pincode) => {
+    const regex = /^\d{6}$/
+    return {
+      isValid: regex.test(pincode),
+      message: !regex.test(pincode) ? 'Pincode must be exactly 6 digits' : null,
+    }
+  },
+
+  // Validate email
+  validateEmail: (email) => {
+    const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    return {
+      isValid: regex.test(email),
+      message: !regex.test(email) ? 'Invalid email format' : null,
+    }
+  },
+
+  // Validate dispatch category
+  validateCategory: (category) => {
+    const validCategories = ['police', 'fire', 'medical']
+    const normalized = category?.toString().toLowerCase().trim()
+    return {
+      isValid: validCategories.includes(normalized),
+      normalized,
+      validCategories,
+      message: !validCategories.includes(normalized)
+        ? `Category must be one of: ${validCategories.join(', ')}`
+        : null,
+    }
+  },
+}
+
+// ===========================================
+// DISPATCH UNIT ROUTES
+// ===========================================
+
+// 1. Check username uniqueness
+app.post('/dispatch/check-username', async (req, res) => {
+  try {
+    const { username } = req.body
+
+    if (!username) {
+      return res.status(400).json({
+        detail: 'Username is required',
+        isUnique: false,
+      })
+    }
+
+    const validation = dispatchValidation.validateUsername(username)
+    if (!validation.isValid) {
+      return res.status(400).json({
+        detail: validation.message,
+        isUnique: false,
+      })
+    }
+
+    const cleanUsername = username.toLowerCase().trim()
+
+    // Check if username exists
+    const { data: existingUnit, error } = await supabase
+      .from('dispatch_units')
+      .select('id, username')
+      .eq('username', cleanUsername)
+      .limit(1)
+      .single()
+
+    if (error && error.code !== 'PGRST116') {
+      console.error('Username check error:', error)
+      return res.status(500).json({
+        detail: 'Failed to check username availability',
+        isUnique: false,
+      })
+    }
+
+    const isUnique = !existingUnit
+
+    res.json({ isUnique })
+  } catch (err) {
+    console.error('Username check error:', err)
+    res.status(500).json({
+      detail: 'Failed to check username availability',
+      isUnique: false,
+    })
+  }
+})
+
+// 2. Send OTP for registration
+app.post('/dispatch/send_otp', async (req, res) => {
+  try {
+    const {
+      department_name,
+      unit_type,
+      place,
+      district,
+      state,
+      pincode,
+      username,
+      contact_number,
+      alternate_contact_number,
+      email,
+      password,
+      officer_in_charge,
+      officer_contact,
+      vehicle_count,
+    } = req.body
+
+    // Validate required fields
+    const requiredFields = {
+      department_name,
+      unit_type,
+      place,
+      district,
+      state,
+      pincode,
+      username,
+      contact_number,
+      email,
+      password,
+      officer_in_charge,
+      officer_contact,
+    }
+
+    const missingFields = Object.entries(requiredFields)
+      .filter(([key, value]) => !value || value.toString().trim() === '')
+      .map(([key]) => key.replace('_', ' '))
+
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        detail: `Missing required fields: ${missingFields.join(', ')}`,
+        missingFields,
+      })
+    }
+
+    // Validate individual fields
+    const validations = {
+      username: dispatchValidation.validateUsername(username),
+      contact: dispatchValidation.validateContactNumber(contact_number),
+      pincode: dispatchValidation.validatePincode(pincode),
+      email: dispatchValidation.validateEmail(email),
+    }
+
+    // Check for validation errors
+    const validationErrors = Object.entries(validations)
+      .filter(([key, validation]) => !validation.isValid)
+      .map(([key, validation]) => ({ field: key, message: validation.message }))
+
+    if (validationErrors.length > 0) {
+      return res.status(400).json({
+        detail: 'Validation failed',
+        errors: validationErrors,
+      })
+    }
+
+    const cleanUsername = username.toLowerCase().trim()
+    const formattedContact = validations.contact.formatted
+
+    // Check for existing dispatch units
+    const { data: existingUnit, error: checkError } = await supabase
+      .from('dispatch_units')
+      .select('id, email, contact_number, username')
+      .or(
+        `email.eq.${email},contact_number.eq.${formattedContact},username.eq.${cleanUsername}`
+      )
+      .single()
+
+    if (existingUnit) {
+      let conflictField = 'information'
+      if (existingUnit.email === email) conflictField = 'email'
+      else if (existingUnit.contact_number === formattedContact)
+        conflictField = 'contact number'
+      else if (existingUnit.username === cleanUsername)
+        conflictField = 'username'
+
+      return res.status(400).json({
+        detail: `Dispatch unit with this ${conflictField} already exists`,
+      })
+    }
+
+    // Generate and store OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString()
+    const expiresAt = Date.now() + 5 * 60 * 1000 // 5 minutes
+
+    dispatchOtpStore.set(formattedContact, {
+      otp,
+      expiresAt,
+      attempts: 0,
+      lastSentAt: Date.now(),
+      dispatchData: {
+        department_name: department_name.trim(),
+        unit_type,
+        place: place.trim(),
+        district: district.trim(),
+        state: state.trim(),
+        pincode: pincode.trim(),
+        username: cleanUsername,
+        contact_number: formattedContact,
+        alternate_contact_number: alternate_contact_number?.trim() || null,
+        email: email.toLowerCase().trim(),
+        password,
+        officer_in_charge: officer_in_charge.trim(),
+        officer_contact: officer_contact.trim(),
+        vehicle_count: vehicle_count ? parseInt(vehicle_count) : 0,
+      },
+    })
+
+    // Send OTP via Twilio
+    await client.messages.create({
+      body: `Your Emergency Dispatch Unit registration OTP is ${otp}. Valid for 5 minutes. Do not share this code.`,
+      from: process.env.TWILIO_PHONE,
+      to: formattedContact,
+    })
+
+    console.log(`Dispatch OTP sent to ${formattedContact}`)
+
+    res.json({
+      message: 'OTP sent successfully to dispatch unit contact number',
+      expiresIn: 300, // 5 minutes in seconds
+    })
+  } catch (err) {
+    console.error('Dispatch OTP error:', err)
+    res.status(500).json({
+      detail: 'Failed to send OTP. Please try again later.',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined,
+    })
+  }
+})
+
+// 3. Verify OTP and register dispatch unit
+app.post('/dispatch/verify_otp', async (req, res) => {
+  try {
+    const { contact_number, otp } = req.body
+
+    if (!contact_number || !otp) {
+      return res.status(400).json({
+        error: 'Contact number and OTP are required',
+      })
+    }
+
+    const record = dispatchOtpStore.get(contact_number)
+
+    if (!record) {
+      return res.status(400).json({
+        error: 'OTP not found or expired. Please request a new OTP.',
+      })
+    }
+
+    // Check if OTP has expired
+    if (Date.now() > record.expiresAt) {
+      dispatchOtpStore.delete(contact_number)
+      return res.status(400).json({
+        error: 'OTP has expired. Please request a new OTP.',
+      })
+    }
+
+    // Check OTP attempts (prevent brute force)
+    if (record.attempts >= 3) {
+      dispatchOtpStore.delete(contact_number)
+      return res.status(429).json({
+        error: 'Too many incorrect attempts. Please request a new OTP.',
+      })
+    }
+
+    // Verify OTP
+    if (record.otp !== otp.toString().trim()) {
+      record.attempts += 1
+      dispatchOtpStore.set(contact_number, record)
+
+      return res.status(400).json({
+        error: 'Invalid OTP',
+        attemptsRemaining: 3 - record.attempts,
+      })
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(record.dispatchData.password, 12)
+
+    // Insert dispatch unit into database
+    const { error: insertError, data: newUnit } = await supabase
+      .from('dispatch_units')
+      .insert([
+        {
+          ...record.dispatchData,
+          password_hash: hashedPassword,
+          is_active: true,
+          is_verified: true,
+          registered_at: new Date().toISOString(),
+        },
+      ])
+      .select(
+        'id, email, username, department_name, unit_type, place, district, state, contact_number'
+      )
+      .single()
+
+    if (insertError) {
+      console.error('Dispatch unit insert error:', insertError)
+
+      // Handle specific database errors
+      if (insertError.code === '23505') {
+        // Unique constraint violation
+        return res.status(400).json({
+          error: 'A dispatch unit with this information already exists',
+        })
+      }
+
+      return res.status(500).json({
+        error: 'Failed to register dispatch unit. Please try again.',
+      })
+    }
+
+    // Clean up OTP store
+    dispatchOtpStore.delete(contact_number)
+
+    // Generate JWT token
+    const tokenPayload = {
+      unit_id: newUnit.id,
+      email: newUnit.email,
+      username: newUnit.username,
+      userType: 'dispatch_unit',
+      department_name: newUnit.department_name,
+      unit_type: newUnit.unit_type,
+      place: newUnit.place,
+      district: newUnit.district,
+      state: newUnit.state,
+    }
+
+    const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, {
+      expiresIn: '7d',
+      issuer: 'emergency-dispatch-system',
+      audience: 'dispatch-units',
+    })
+
+    console.log(
+      `New dispatch unit registered: ${newUnit.username} (${newUnit.department_name})`
+    )
+
+    res.status(201).json({
+      message: 'Dispatch unit registered successfully',
+      unit: newUnit,
+      token,
+    })
+  } catch (err) {
+    console.error('Dispatch unit verification error:', err)
+    res.status(500).json({
+      error: 'Registration failed. Please try again later.',
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined,
+    })
+  }
+})
+
+// 4. Resend OTP
+app.post('/dispatch/resend_otp', async (req, res) => {
+  try {
+    const { contact_number } = req.body
+
+    if (!contact_number) {
+      return res.status(400).json({
+        error: 'Contact number is required',
+      })
+    }
+
+    const record = dispatchOtpStore.get(contact_number)
+
+    if (!record) {
+      return res.status(400).json({
+        error: 'No OTP request found. Please start registration again.',
+      })
+    }
+
+    // Check cooldown (prevent spam)
+    const now = Date.now()
+    const cooldownPeriod = 60 * 1000 // 1 minute
+
+    if (record.lastSentAt && now - record.lastSentAt < cooldownPeriod) {
+      const waitTime = Math.ceil(
+        (cooldownPeriod - (now - record.lastSentAt)) / 1000
+      )
+      return res.status(429).json({
+        error: `Please wait ${waitTime} seconds before requesting a new OTP`,
+      })
+    }
+
+    // Generate new OTP
+    const newOtp = Math.floor(100000 + Math.random() * 900000).toString()
+
+    // Update record
+    record.otp = newOtp
+    record.expiresAt = now + 5 * 60 * 1000 // 5 minutes
+    record.lastSentAt = now
+    record.attempts = 0 // Reset attempts
+
+    dispatchOtpStore.set(contact_number, record)
+
+    // Send new OTP
+    await client.messages.create({
+      body: `Your new Emergency Dispatch Unit registration OTP is ${newOtp}. Valid for 5 minutes. Do not share this code.`,
+      from: process.env.TWILIO_PHONE,
+      to: contact_number,
+    })
+
+    console.log(`New dispatch OTP sent to ${contact_number}`)
+
+    res.json({
+      message: 'New OTP sent successfully',
+      expiresIn: 300,
+    })
+  } catch (err) {
+    console.error('Dispatch resend OTP error:', err)
+    res.status(500).json({
+      error: 'Failed to resend OTP. Please try again later.',
+    })
+  }
+})
+
+// ===========================================
+// AUTHENTICATION MIDDLEWARE
+// ===========================================
+
+function authenticateDispatchUnit(req, res, next) {
+  const authHeader = req.headers['authorization']
+  const token = authHeader && authHeader.split(' ')[1]
+
+  if (!token) {
+    return res.status(401).json({
+      error: 'Access token required',
+      code: 'MISSING_TOKEN',
+    })
+  }
+
+  jwt.verify(token, process.env.JWT_SECRET, async (err, decoded) => {
+    if (err) {
+      console.error('JWT verification error:', err.message)
+
+      let errorMessage = 'Invalid token'
+      let errorCode = 'INVALID_TOKEN'
+
+      if (err.name === 'TokenExpiredError') {
+        errorMessage = 'Token has expired. Please login again.'
+        errorCode = 'TOKEN_EXPIRED'
+      } else if (err.name === 'JsonWebTokenError') {
+        errorMessage = 'Invalid token format'
+        errorCode = 'MALFORMED_TOKEN'
+      }
+
+      return res.status(403).json({
+        error: errorMessage,
+        code: errorCode,
+        expired: err.name === 'TokenExpiredError',
+      })
+    }
+
+    if (decoded.userType !== 'dispatch_unit') {
+      return res.status(403).json({
+        error: 'Dispatch unit access required',
+        code: 'INVALID_USER_TYPE',
+        requiredType: 'dispatch_unit',
+        actualType: decoded.userType,
+      })
+    }
+
+    // Additional validation for required fields
+    if (!decoded.unit_id) {
+      return res.status(403).json({
+        error: 'Invalid token payload',
+        code: 'INCOMPLETE_TOKEN',
+      })
+    }
+
+    // Verify dispatch unit is still active (optional security check)
+    try {
+      const { data: unit } = await supabase
+        .from('dispatch_units')
+        .select('is_active, is_verified')
+        .eq('id', decoded.unit_id)
+        .single()
+
+      if (!unit?.is_active || !unit?.is_verified) {
+        return res.status(403).json({
+          error: 'Dispatch unit account is deactivated or unverified',
+          code: 'ACCOUNT_DEACTIVATED',
+        })
+      }
+    } catch (dbError) {
+      console.error('Database check error:', dbError)
+      // Continue without database check if there's an error
+    }
+
+    req.unit = decoded
+    next()
+  })
+}
+
+// ===========================================
+// DISPATCH UNIT LOGIN
+// ===========================================
+
+app.post('/dispatch/login', async (req, res) => {
+  try {
+    const { username, password, category } = req.body
+
+    // Input validation
+    const validationErrors = []
+
+    if (!username?.trim()) {
+      validationErrors.push({
+        field: 'username',
+        message: 'Username is required',
+      })
+    }
+
+    if (!password) {
+      validationErrors.push({
+        field: 'password',
+        message: 'Password is required',
+      })
+    }
+
+    const categoryValidation = dispatchValidation.validateCategory(category)
+    if (!categoryValidation.isValid) {
+      validationErrors.push({
+        field: 'category',
+        message: categoryValidation.message,
+        validCategories: categoryValidation.validCategories,
+      })
+    }
+
+    if (validationErrors.length > 0) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        errors: validationErrors,
+      })
+    }
+
+    const cleanUsername = username.toLowerCase().trim()
+    const normalizedCategory = categoryValidation.normalized
+
+    // Fetch dispatch unit
+    const { data: dispatch, error } = await supabase
+      .from('dispatch_units')
+      .select('*')
+      .eq('username', cleanUsername)
+      .single()
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return res.status(401).json({ error: 'Invalid username or password' })
+      } else {
+        console.error('Database error during login:', error)
+        return res.status(500).json({
+          error: 'Database connection failed. Please try again later.',
+        })
+      }
+    }
+
+    // Check account status
+    if (!dispatch.is_verified) {
+      return res.status(401).json({
+        error:
+          'Your dispatch unit account is not verified. Please contact your administrator.',
+      })
+    }
+
+    if (!dispatch.is_active) {
+      return res.status(401).json({
+        error:
+          'Your dispatch unit has been deactivated. Please contact your supervisor.',
+      })
+    }
+
+    // Verify password
+    const isValidPassword = await bcrypt.compare(
+      password,
+      dispatch.password_hash
+    )
+
+    if (!isValidPassword) {
+      // Optional: implement failed login attempt tracking
+      return res.status(401).json({ error: 'Invalid username or password' })
+    }
+
+    // Check unit type compatibility with category
+    const unitTypeCompatibility = {
+      'Police Station': ['police'],
+      'Traffic Police': ['police'],
+      'Fire Station': ['fire'],
+      'Hospital/Medical Center': ['medical'],
+      'Ambulance Service': ['medical'],
+      'Emergency Response Team': ['police', 'fire', 'medical'],
+      'Disaster Management': ['police', 'fire', 'medical'],
+      Other: ['police', 'fire', 'medical'],
+    }
+
+    const allowedCategories = unitTypeCompatibility[dispatch.unit_type] || []
+    if (
+      allowedCategories.length > 0 &&
+      !allowedCategories.includes(normalizedCategory)
+    ) {
+      return res.status(400).json({
+        error: `This unit is registered as "${dispatch.unit_type}" and cannot access "${normalizedCategory}" services.`,
+        allowedCategories,
+        unitType: dispatch.unit_type,
+      })
+    }
+
+    // Update last login
+    const loginTime = new Date().toISOString()
+    await supabase
+      .from('dispatch_units')
+      .update({ last_login: loginTime })
+      .eq('id', dispatch.id)
+
+    // Generate JWT token
+    const tokenPayload = {
+      unit_id: dispatch.id,
+      email: dispatch.email,
+      username: dispatch.username,
+      category: normalizedCategory,
+      userType: 'dispatch_unit',
+      department_name: dispatch.department_name,
+      unit_type: dispatch.unit_type,
+      place: dispatch.place,
+      district: dispatch.district,
+      state: dispatch.state,
+      login_time: loginTime,
+    }
+
+    const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, {
+      expiresIn: '8h',
+      issuer: 'emergency-dispatch-system',
+      audience: 'dispatch-units',
+    })
+
+    console.log(
+      `Dispatch login successful: ${dispatch.username} (${normalizedCategory})`
+    )
+
+    const responseData = {
+      message: 'Dispatch login successful',
+      dispatch: {
+        id: dispatch.id,
+        email: dispatch.email,
+        username: dispatch.username,
+        department_name: dispatch.department_name,
+        unit_type: dispatch.unit_type,
+        category: normalizedCategory,
+        place: dispatch.place,
+        district: dispatch.district,
+        state: dispatch.state,
+        officer_in_charge: dispatch.officer_in_charge,
+        vehicle_count: dispatch.vehicle_count || 0,
+        last_login: loginTime,
+        contact_number: dispatch.contact_number,
+        alternate_contact_number: dispatch.alternate_contact_number,
+      },
+      token,
+      session: {
+        loginTime,
+        expiresAt: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString(),
+        category: normalizedCategory,
+      },
+    }
+
+    res.json(responseData)
+  } catch (err) {
+    console.error('Dispatch login error:', err)
+    res.status(500).json({
+      error: 'Login failed. Please try again later.',
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined,
+    })
+  }
+})
+
+// Change password
+app.put(
+  '/dispatch/change-password',
+  authenticateDispatchUnit,
+  async (req, res) => {
+    try {
+      const { current_password, new_password } = req.body
+
+      if (!current_password || !new_password) {
+        return res.status(400).json({
+          error: 'Current password and new password are required',
+        })
+      }
+
+      if (new_password.length < 8) {
+        return res.status(400).json({
+          error: 'New password must be at least 8 characters long',
+        })
+      }
+
+      // Get current unit data
+      const { data: unit, error } = await supabase
+        .from('dispatch_units')
+        .select('password_hash')
+        .eq('id', req.unit.unit_id)
+        .single()
+
+      if (error || !unit) {
+        return res.status(404).json({ error: 'Dispatch unit not found' })
+      }
+
+      // Verify current password
+      const isValidPassword = await bcrypt.compare(
+        current_password,
+        unit.password_hash
+      )
+      if (!isValidPassword) {
+        return res.status(401).json({ error: 'Current password is incorrect' })
+      }
+
+      // Hash new password
+      const hashedNewPassword = await bcrypt.hash(new_password, 12)
+
+      // Update password
+      const { error: updateError } = await supabase
+        .from('dispatch_units')
+        .update({
+          password_hash: hashedNewPassword,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', req.unit.unit_id)
+
+      if (updateError) {
+        console.error('Password update error:', updateError)
+        return res.status(500).json({ error: 'Failed to update password' })
+      }
+
+      console.log(`Password updated for dispatch unit: ${req.unit.username}`)
+
+      res.json({
+        message: 'Password updated successfully',
+        success: true,
+      })
+    } catch (err) {
+      console.error('Change password error:', err)
+      res.status(500).json({ error: 'Failed to change password' })
+    }
+  }
+)
+
+// Logout
+app.post('/dispatch/logout', authenticateDispatchUnit, async (req, res) => {
+  try {
+    const { unit_id, username } = req.unit
+
+    // Optional: Log logout activity
+    console.log(`Dispatch unit logged out: ${username}`)
+
+    // Optional: Update last activity timestamp
+    await supabase
+      .from('dispatch_units')
+      .update({ last_activity: new Date().toISOString() })
+      .eq('id', unit_id)
+
+    res.json({
+      message: 'Logged out successfully',
+      success: true,
+    })
+  } catch (err) {
+    console.error('Dispatch logout error:', err)
+    res.status(500).json({ error: 'Logout failed' })
+  }
+})
 app.listen(PORT, () =>
   console.log(`🚀 Server running on http://localhost:${PORT}`)
 )

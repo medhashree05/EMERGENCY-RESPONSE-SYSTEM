@@ -1,0 +1,571 @@
+/* Dispatch Unit Registration Page Styles */
+.dispatch-register-page {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 50%, #0f172a 100%);
+  color: white;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    sans-serif;
+  padding: 20px 0;
+}
+
+.dispatch-register-container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+/* Header */
+.dispatch-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.dispatch-back-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #bfdbfe;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  font-size: 14px;
+}
+
+.dispatch-back-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  transform: translateX(-2px);
+}
+
+.dispatch-logo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  color: white;
+}
+
+.dispatch-logo .emergency-icon {
+  font-size: 2.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.dispatch-logo h1 {
+  font-size: 1.5rem;
+  font-weight: bold;
+  margin: 0;
+}
+
+/* Main Card */
+.dispatch-card {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 1rem;
+  padding: 2.5rem;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+}
+
+.dispatch-card-header {
+  text-align: center;
+  margin-bottom: 2.5rem;
+}
+
+.dispatch-card-header h2 {
+  font-size: 1.75rem;
+  font-weight: bold;
+  margin: 0 0 0.5rem 0;
+  color: #ffffff;
+}
+
+.dispatch-card-header p {
+  color: #bfdbfe;
+  font-size: 1rem;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Form Structure */
+.dispatch-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.875rem;
+}
+
+.dispatch-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.dispatch-section h3 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #93c5fd;
+  border-bottom: 2px solid rgba(147, 197, 253, 0.3);
+  padding-bottom: 0.625rem;
+  margin: 0 0 1.25rem 0;
+}
+
+.dispatch-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.dispatch-form-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.dispatch-form-group:last-child {
+  margin-bottom: 0;
+}
+
+.dispatch-form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  font-size: 0.875rem;
+}
+
+.dispatch-form-group input,
+.dispatch-form-group select,
+.dispatch-form-group textarea {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  color: white;
+  font-size: 1rem;
+  transition: all 0.3s ease;
+  box-sizing: border-box;
+}
+
+.dispatch-form-group input::placeholder,
+.dispatch-form-group select::placeholder,
+.dispatch-form-group textarea::placeholder {
+  color: #94a3b8;
+}
+
+.dispatch-form-group input:focus,
+.dispatch-form-group select:focus,
+.dispatch-form-group textarea:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.dispatch-form-group input.error,
+.dispatch-form-group select.error,
+.dispatch-form-group textarea.error {
+  border-color: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+}
+
+/* Username Container and Validation Styles */
+.dispatch-username-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.dispatch-username-container input {
+  padding-right: 2.5rem !important;
+}
+
+.dispatch-username-status {
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dispatch-username-status.success {
+  color: #22c55e;
+  font-size: 1.25rem;
+  font-weight: bold;
+}
+
+.dispatch-username-help {
+  color: #94a3b8;
+  font-size: 0.75rem;
+  margin-top: 0.25rem;
+  line-height: 1.4;
+}
+
+/* Username Input States */
+.dispatch-form-group input.checking {
+  border-color: #fbbf24;
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.1);
+}
+
+.dispatch-form-group input.success {
+  border-color: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.1);
+}
+
+.dispatch-form-group select {
+  cursor: pointer;
+}
+
+.dispatch-form-group select option {
+  background: #1e293b;
+  color: white;
+}
+
+/* Error Messages */
+.dispatch-error-message {
+  color: #fca5a5;
+  font-size: 0.875rem;
+  margin-top: 0.3125rem;
+  display: block;
+}
+
+/* Full Width Fields */
+.dispatch-full-width {
+  grid-column: 1 / -1;
+}
+
+/* Checkbox Styles */
+.dispatch-checkbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9375rem;
+  margin-bottom: 1.875rem;
+}
+
+.dispatch-checkbox-label {
+  display: flex;
+  align-items: flex-start;
+  cursor: pointer;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  gap: 0.625rem;
+}
+
+.dispatch-checkbox-label input[type='checkbox'] {
+  width: auto;
+  margin: 0;
+  margin-top: 0.125rem;
+  flex-shrink: 0;
+}
+
+.dispatch-checkbox-label span {
+  color: #e2e8f0;
+}
+
+.dispatch-checkbox-label .link {
+  color: #60a5fa;
+  text-decoration: none;
+  transition: color 0.3s ease;
+}
+
+.dispatch-checkbox-label .link:hover {
+  color: #93c5fd;
+  text-decoration: underline;
+}
+
+/* Submit Button */
+.dispatch-submit-container {
+  text-align: center;
+  margin-top: 1.25rem;
+}
+
+.dispatch-submit-btn {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: white;
+  border: none;
+  padding: 0.9375rem 2.5rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  font-size: 1.125rem;
+  font-weight: 600;
+  min-width: 200px;
+  transition: all 0.3s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.dispatch-submit-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(239, 68, 68, 0.3);
+}
+
+.dispatch-submit-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+  background: #6b7280;
+}
+
+.dispatch-loading-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid transparent;
+  border-top: 2px solid white;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.dispatch-loading-spinner-small {
+  width: 16px;
+  height: 16px;
+  border: 2px solid transparent;
+  border-top: 2px solid #93c5fd;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Login Link */
+.dispatch-login-link {
+  text-align: center;
+  margin-top: 1.875rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.dispatch-login-link p {
+  color: #bfdbfe;
+  font-size: 0.875rem;
+  margin: 0;
+}
+
+.dispatch-link-btn {
+  background: none;
+  border: none;
+  color: #60a5fa;
+  cursor: pointer;
+  text-decoration: underline;
+  font-size: inherit;
+  transition: color 0.3s ease;
+}
+
+.dispatch-link-btn:hover {
+  color: #93c5fd;
+}
+
+/* OTP Popup */
+.dispatch-otp-popup {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+.dispatch-otp-content {
+  background: white;
+  padding: 2rem 1.875rem;
+  border-radius: 0.75rem;
+  text-align: center;
+  min-width: 300px;
+  max-width: 400px;
+  width: 90vw;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  color: #333;
+}
+
+.dispatch-otp-content h3 {
+  margin: 0 0 1.25rem 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.dispatch-otp-input {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.5rem;
+  font-size: 1rem;
+  text-align: center;
+  margin-bottom: 1.25rem;
+  box-sizing: border-box;
+  color: #333;
+  letter-spacing: 2px;
+}
+
+.dispatch-otp-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.dispatch-otp-actions {
+  display: flex;
+  gap: 0.625rem;
+}
+
+.dispatch-otp-btn {
+  flex: 1;
+  padding: 0.75rem;
+  border: none;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.dispatch-otp-verify {
+  background: #3b82f6;
+  color: white;
+}
+
+.dispatch-otp-verify:hover {
+  background: #2563eb;
+}
+
+.dispatch-otp-resend {
+  background: #6b7280;
+  color: white;
+}
+
+.dispatch-otp-resend:hover:not(:disabled) {
+  background: #4b5563;
+}
+
+.dispatch-otp-resend:disabled {
+  background: #d1d5db;
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .dispatch-register-container {
+    padding: 0 15px;
+  }
+
+  .dispatch-header {
+    flex-direction: column;
+    text-align: center;
+    gap: 0.75rem;
+  }
+
+  .dispatch-card {
+    padding: 1.5rem;
+  }
+
+  .dispatch-card-header h2 {
+    font-size: 1.5rem;
+  }
+
+  .dispatch-form-row {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .dispatch-section h3 {
+    font-size: 1rem;
+  }
+
+  .dispatch-form {
+    gap: 1.5rem;
+  }
+
+  .dispatch-username-help {
+    font-size: 0.7rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .dispatch-register-page {
+    padding: 10px 0;
+  }
+
+  .dispatch-card {
+    padding: 1rem;
+  }
+
+  .dispatch-card-header {
+    margin-bottom: 2rem;
+  }
+
+  .dispatch-card-header h2 {
+    font-size: 1.25rem;
+  }
+
+  .dispatch-card-header p {
+    font-size: 0.875rem;
+  }
+
+  .dispatch-form {
+    gap: 1.25rem;
+  }
+
+  .dispatch-form-group input,
+  .dispatch-form-group select,
+  .dispatch-form-group textarea {
+    padding: 0.625rem;
+  }
+
+  .dispatch-username-container input {
+    padding-right: 2rem !important;
+  }
+
+  .dispatch-username-status {
+    right: 0.5rem;
+  }
+
+  .dispatch-username-help {
+    font-size: 0.65rem;
+  }
+
+  .dispatch-submit-btn {
+    width: 100%;
+    padding: 1rem;
+    font-size: 1rem;
+    min-width: auto;
+  }
+
+  .dispatch-otp-content {
+    padding: 1.5rem 1rem;
+    min-width: auto;
+  }
+
+  .dispatch-otp-actions {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+}

@@ -3,23 +3,43 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 import './Login.css'
 
-
-
 function Login() {
   const [formData, setFormData] = useState({
     email: '',
     password: '',
+    username: '',
+    category: '',
     userType: 'user',
     rememberMe: false,
   })
   const navigate = useNavigate()
 
-  
-
   const [errors, setErrors] = useState({})
   const [isLoading, setIsLoading] = useState(false)
   const [showForgotPassword, setShowForgotPassword] = useState(false)
   const [forgotEmail, setForgotEmail] = useState('')
+
+  // Enhanced dispatch categories with more specific unit types
+  const dispatchCategories = [
+    {
+      value: 'police',
+      label: 'Police Unit',
+      icon: '🚔',
+      description: 'Police Station, Traffic Police, Law Enforcement',
+    },
+    {
+      value: 'fire',
+      label: 'Fire Department',
+      icon: '🚒',
+      description: 'Fire Station, Fire and Rescue Services',
+    },
+    {
+      value: 'medical',
+      label: 'Medical Emergency',
+      icon: '🚑',
+      description: 'Hospital, Medical Center, Ambulance Service',
+    },
+  ]
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target
@@ -28,25 +48,51 @@ function Login() {
       [name]: type === 'checkbox' ? checked : value,
     }))
 
+    // Clear specific field errors when user starts typing
     if (errors[name]) {
       setErrors((prev) => ({ ...prev, [name]: '' }))
+    }
+
+    // Clear general errors when user makes changes
+    if (errors.general) {
+      setErrors((prev) => ({ ...prev, general: '' }))
     }
   }
 
   const validateForm = () => {
     const newErrors = {}
 
-    if (!formData.email.trim()) {
-      newErrors.email = 'Email is required'
-    } else {
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-      if (!emailRegex.test(formData.email)) {
-        newErrors.email = 'Please enter a valid email address'
+    if (formData.userType === 'dispatch') {
+      // Dispatch unit validation
+      if (!formData.category) {
+        newErrors.category = 'Please select a dispatch category'
       }
-    }
 
-    if (!formData.password) {
-      newErrors.password = 'Password is required'
+      if (!formData.username.trim()) {
+        newErrors.username = 'Username is required'
+      } else if (formData.username.trim().length < 3) {
+        newErrors.username = 'Username must be at least 3 characters'
+      }
+
+      if (!formData.password) {
+        newErrors.password = 'Password is required'
+      } else if (formData.password.length < 6) {
+        newErrors.password = 'Password must be at least 6 characters'
+      }
+    } else {
+      // Regular user/admin validation
+      if (!formData.email.trim()) {
+        newErrors.email = 'Email is required'
+      } else {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+        if (!emailRegex.test(formData.email)) {
+          newErrors.email = 'Please enter a valid email address'
+        }
+      }
+
+      if (!formData.password) {
+        newErrors.password = 'Password is required'
+      }
     }
 
     if (!formData.userType) {
@@ -59,23 +105,36 @@ function Login() {
   // Enhanced user data storage and state update
   const updateApplicationState = (userData, userType, token) => {
     try {
-      // Store in localStorage
-      localStorage.setItem('user', JSON.stringify(userData))
+      // Store in localStorage with proper error handling
+      const userToStore = {
+        ...userData,
+        userType: userType,
+        isAuthenticated: true,
+        loginTime: new Date().toISOString(),
+        ...(userType === 'admin' && { role: 'admin' }),
+        ...(userType === 'dispatch' && {
+          role: 'dispatch',
+          category: formData.category,
+        }),
+      }
+
+      localStorage.setItem('user', JSON.stringify(userToStore))
       localStorage.setItem('token', token)
       localStorage.setItem('userType', userType)
       localStorage.setItem('isAuthenticated', 'true')
 
-    
+      // Trigger a custom event for other components
+      window.dispatchEvent(
+        new CustomEvent('userLogin', {
+          detail: { user: userToStore, userType, token },
+        })
+      )
 
-      // Trigger a custom event that other parts of your app can listen to
-      window.dispatchEvent(new CustomEvent('userLogin', {
-        detail: { user: userData, userType, token }
-      }))
-
-      // Force a small delay to ensure state propagation
-      return new Promise(resolve => setTimeout(resolve, 100))
+      console.log('✅ User data stored successfully:', userToStore)
+      return Promise.resolve()
     } catch (error) {
-      console.error('Error updating application state:', error)
+      console.error('❌ Error updating application state:', error)
+      return Promise.reject(error)
     }
   }
 
@@ -92,99 +151,164 @@ function Login() {
     setErrors({})
 
     try {
-      const endpoint =
-        formData.userType === 'admin'
-          ? 'http://localhost:8000/admin/login'
-          : 'http://localhost:8000/login'
+      let endpoint
+      let requestBody
+
+      // Determine endpoint and request body based on user type
+      if (formData.userType === 'admin') {
+        endpoint = 'http://localhost:8000/admin/login'
+        requestBody = {
+          email: formData.email.trim(),
+          password: formData.password,
+        }
+      } else if (formData.userType === 'dispatch') {
+        endpoint = 'http://localhost:8000/dispatch/login'
+        requestBody = {
+          username: formData.username.trim(),
+          password: formData.password,
+          category: formData.category,
+        }
+      } else {
+        endpoint = 'http://localhost:8000/login'
+        requestBody = {
+          email: formData.email.trim(),
+          password: formData.password,
+          userType: formData.userType,
+        }
+      }
 
       console.log(`🔄 Attempting ${formData.userType} login to:`, endpoint)
+      console.log('📤 Request body:', { ...requestBody, password: '[HIDDEN]' })
 
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: formData.email,
-          password: formData.password,
-          ...(formData.userType === 'user' && { userType: formData.userType }),
-        }),
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify(requestBody),
       })
 
       const data = await response.json()
-      console.log('📄 Server response:', data)
+      console.log('📄 Server response status:', response.status)
 
-      if (response.ok) {
-        const isAdmin = formData.userType === 'admin'
-        const userData = isAdmin ? data.admin : data.user
-        const userType = isAdmin ? 'admin' : 'user'
+      if (response.ok && data.token) {
+        let userData, userType
+
+        // Extract user data based on response structure
+        if (formData.userType === 'admin') {
+          userData = data.admin
+          userType = 'admin'
+        } else if (formData.userType === 'dispatch') {
+          userData = data.dispatch
+          userType = 'dispatch'
+        } else {
+          userData = data.user
+          userType = 'user'
+        }
 
         console.log('✅ Login successful, user data:', userData)
 
-        // Enhanced user data structure
-        const userToStore = {
-          ...userData,
-          userType: userType,
-          isAuthenticated: true,
-          loginTime: new Date().toISOString(),
-          ...(isAdmin && { role: 'admin' }),
-        }
+        // Update application state
+        await updateApplicationState(userData, userType, data.token)
 
-        console.log('💾 Storing user data:', userToStore)
-
-        // Update application state first
-        await updateApplicationState(userToStore, userType, data.token)
-
-        alert(
-          `${isAdmin ? 'Admin' : 'User'} login successful! Welcome back${
+        // Create personalized welcome message
+        let welcomeMessage
+        if (formData.userType === 'admin') {
+          welcomeMessage = `Admin login successful! Welcome back${
             userData?.first_name ? `, ${userData.first_name}` : ''
           }.`
-        )
+        } else if (formData.userType === 'dispatch') {
+          const categoryInfo = dispatchCategories.find(
+            (cat) => cat.value === formData.category
+          )
+          welcomeMessage = `Dispatch login successful! Welcome to ${
+            categoryInfo?.label || formData.category
+          } unit${
+            userData?.department_name ? ` - ${userData.department_name}` : ''
+          }.`
+        } else {
+          welcomeMessage = `Login successful! Welcome back${
+            userData?.first_name ? `, ${userData.first_name}` : ''
+          }.`
+        }
 
-        console.log(`🧭 Navigating to ${isAdmin ? 'admin dashboard' : 'home'}...`)
+        // Show success message
+        alert(welcomeMessage)
 
-        // Use replace instead of navigate to prevent back button issues
-        if (isAdmin) {
+        // Navigate to appropriate dashboard
+        console.log(`🧭 Navigating to dashboard...`)
+
+        if (formData.userType === 'admin') {
           navigate('/admin-dashboard', { replace: true })
+        } else if (formData.userType === 'dispatch') {
+          navigate('/dispatch-dashboard', { replace: true })
         } else {
           navigate('/', { replace: true })
         }
 
-      
-         setTimeout(() => {
+        // Small delay then reload to ensure state is updated
+        setTimeout(() => {
           window.location.reload()
-         }, 100)
-
+        }, 100)
       } else {
         console.error('❌ Login failed:', data)
-        
-        const errorMessage = data.error || data.message || 'Invalid credentials'
-
-        if (formData.userType === 'admin') {
-          if (errorMessage.includes('deactivated')) {
-            setErrors({
-              general:
-                'Your admin account has been deactivated. Please contact the super administrator.',
-            })
-          } else if (errorMessage.includes('Invalid email or password')) {
-            setErrors({
-              general:
-                'Invalid admin credentials. Please check your email and password.',
-            })
-          } else {
-            setErrors({ general: errorMessage })
-          }
-        } else {
-          setErrors({ general: errorMessage })
-        }
+        handleLoginError(data, formData.userType)
       }
     } catch (err) {
       console.error('💥 Login error:', err)
       setErrors({
-        general: `${
-          formData.userType === 'admin' ? 'Admin l' : 'L'
-        }ogin failed. Please check your connection and try again.`,
+        general: `Connection error. Please check your internet connection and try again.`,
       })
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const handleLoginError = (data, userType) => {
+    const errorMessage = data.error || data.message || 'Invalid credentials'
+
+    if (userType === 'admin') {
+      if (errorMessage.includes('deactivated')) {
+        setErrors({
+          general:
+            'Your admin account has been deactivated. Please contact the super administrator.',
+        })
+      } else if (errorMessage.includes('Invalid email or password')) {
+        setErrors({
+          general:
+            'Invalid admin credentials. Please check your email and password.',
+        })
+      } else {
+        setErrors({ general: errorMessage })
+      }
+    } else if (userType === 'dispatch') {
+      if (errorMessage.includes('deactivated')) {
+        setErrors({
+          general:
+            'Your dispatch unit has been deactivated. Please contact your supervisor.',
+        })
+      } else if (errorMessage.includes('Invalid username or password')) {
+        setErrors({
+          general:
+            'Invalid dispatch credentials. Please check your username and password.',
+        })
+      } else if (errorMessage.includes('category')) {
+        setErrors({
+          general:
+            'Category mismatch. Please select the correct category for your unit type.',
+        })
+      } else {
+        setErrors({ general: errorMessage })
+      }
+    } else {
+      if (errorMessage.includes('not verified')) {
+        setErrors({
+          general: 'Please verify your email address before logging in.',
+        })
+      } else {
+        setErrors({ general: errorMessage })
+      }
     }
   }
 
@@ -202,22 +326,45 @@ function Login() {
       return
     }
 
-    const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
-      redirectTo: 'http://localhost:3000/reset-password',
-    })
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
+        redirectTo: 'http://localhost:3000/reset-password',
+      })
 
-    if (error) {
-      alert(error.message)
-    } else {
-      alert('Password reset instructions sent!')
-      setShowForgotPassword(false)
+      if (error) {
+        alert(error.message)
+      } else {
+        alert('Password reset instructions sent to your email!')
+        setShowForgotPassword(false)
+        setForgotEmail('')
+      }
+    } catch (err) {
+      console.error('Password reset error:', err)
+      alert('Failed to send reset email. Please try again.')
     }
   }
 
   const handleBackToHome = () => navigate('/')
   const handleGoToRegister = () => navigate('/register')
-  const handleTextChat = () => navigate('/chat')
-  const handleQuickAccess = (type) => console.log(`Quick access: ${type}`)
+  const handleGoToDispatchRegister = () => navigate('/dispatchregister')
+
+  const getUserTypeDescription = () => {
+    switch (formData.userType) {
+      case 'admin':
+        return 'Admin sign-in to access system management dashboard'
+      case 'dispatch':
+        return 'Dispatch unit sign-in to manage emergency responses'
+      default:
+        return 'Sign in to access your emergency response dashboard'
+    }
+  }
+
+  const getSelectedCategoryInfo = () => {
+    if (formData.userType === 'dispatch' && formData.category) {
+      return dispatchCategories.find((cat) => cat.value === formData.category)
+    }
+    return null
+  }
 
   return (
     <div className="login-page">
@@ -237,11 +384,17 @@ function Login() {
             <div className="login-card">
               <div className="card-header">
                 <h2>Welcome Back</h2>
-                <p>
-                  {formData.userType === 'admin'
-                    ? 'Admin sign-in to access system management'
-                    : 'Sign in to access your emergency response dashboard'}
-                </p>
+                <p>{getUserTypeDescription()}</p>
+                {getSelectedCategoryInfo() && (
+                  <div className="category-info">
+                    <span className="category-icon">
+                      {getSelectedCategoryInfo().icon}
+                    </span>
+                    <span className="category-description">
+                      {getSelectedCategoryInfo().description}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {errors.general && (
@@ -252,6 +405,7 @@ function Login() {
               )}
 
               <form className="login-form" onSubmit={handleSubmit}>
+                {/* User Type Selection */}
                 <div className="form-group">
                   <label>User Type</label>
                   <div className="user-type-selector">
@@ -266,7 +420,21 @@ function Login() {
                       <span className="radio-custom"></span>
                       <span className="radio-text">
                         <span className="user-icon">👤</span>
-                        User
+                        <span>User</span>
+                      </span>
+                    </label>
+                    <label className="radio-label">
+                      <input
+                        type="radio"
+                        name="userType"
+                        value="dispatch"
+                        checked={formData.userType === 'dispatch'}
+                        onChange={handleChange}
+                      />
+                      <span className="radio-custom"></span>
+                      <span className="radio-text">
+                        <span className="dispatch-icon">🚨</span>
+                        <span>Dispatch</span>
                       </span>
                     </label>
                     <label className="radio-label">
@@ -280,7 +448,7 @@ function Login() {
                       <span className="radio-custom"></span>
                       <span className="radio-text">
                         <span className="admin-icon">⚙️</span>
-                        Admin
+                        <span>Admin</span>
                       </span>
                     </label>
                   </div>
@@ -289,26 +457,79 @@ function Login() {
                   )}
                 </div>
 
-                <div className="form-group">
-                  <label>Email Address</label>
-                  <input
-                    type="email"
-                    name="email"
-                    value={formData.email}
-                    onChange={handleChange}
-                    className={errors.email ? 'error' : ''}
-                    placeholder={
-                      formData.userType === 'admin'
-                        ? 'Enter your admin email address'
-                        : 'Enter your email address'
-                    }
-                    autoComplete="email"
-                  />
-                  {errors.email && (
-                    <span className="error-message">{errors.email}</span>
-                  )}
-                </div>
+                {/* Dispatch Unit Category Selection */}
+                {formData.userType === 'dispatch' && (
+                  <div className="form-group">
+                    <label>Dispatch Category</label>
+                    <select
+                      name="category"
+                      value={formData.category}
+                      onChange={handleChange}
+                      className={errors.category ? 'error' : ''}
+                    >
+                      <option value="">Select your dispatch category</option>
+                      {dispatchCategories.map((category) => (
+                        <option key={category.value} value={category.value}>
+                          {category.icon} {category.label}
+                        </option>
+                      ))}
+                    </select>
+                    {errors.category && (
+                      <span className="error-message">{errors.category}</span>
+                    )}
+                    {formData.category && (
+                      <div className="category-help-text">
+                        {
+                          dispatchCategories.find(
+                            (cat) => cat.value === formData.category
+                          )?.description
+                        }
+                      </div>
+                    )}
+                  </div>
+                )}
 
+                {/* Username field for dispatch units */}
+                {formData.userType === 'dispatch' ? (
+                  <div className="form-group">
+                    <label>Username</label>
+                    <input
+                      type="text"
+                      name="username"
+                      value={formData.username}
+                      onChange={handleChange}
+                      className={errors.username ? 'error' : ''}
+                      placeholder="Enter your dispatch username"
+                      autoComplete="username"
+                    />
+                    {errors.username && (
+                      <span className="error-message">{errors.username}</span>
+                    )}
+                  </div>
+                ) : (
+                  /* Email field for users and admins */
+                  <div className="form-group">
+                    <label>Email Address</label>
+                    <input
+                      type="email"
+                      name="email"
+                      value={formData.email}
+                      onChange={handleChange}
+                      className={errors.email ? 'error' : ''}
+                      placeholder={
+                        formData.userType === 'admin'
+                          ? 'Enter your admin email address'
+                          : 'Enter your email address'
+                      }
+                      autoComplete="email"
+                    />
+                    {errors.email && (
+                      <span className="error-message">{errors.email}</span>
+                    )}
+                  </div>
+                )}
+
+                {/* Password field */}
                 <div className="form-group">
                   <label>Password</label>
                   <input
@@ -320,6 +541,8 @@ function Login() {
                     placeholder={
                       formData.userType === 'admin'
                         ? 'Enter your admin password'
+                        : formData.userType === 'dispatch'
+                        ? 'Enter your dispatch password'
                         : 'Enter your password'
                     }
                     autoComplete="current-password"
@@ -329,6 +552,7 @@ function Login() {
                   )}
                 </div>
 
+                {/* Form options */}
                 <div className="form-options">
                   <label className="checkbox-label">
                     <input
@@ -350,10 +574,9 @@ function Login() {
                       Forgot Password?
                     </button>
                   )}
-
-                  
                 </div>
 
+                {/* Submit button */}
                 <button
                   type="submit"
                   className="login2-btn"
@@ -366,12 +589,17 @@ function Login() {
                     </>
                   ) : (
                     `Sign In as ${
-                      formData.userType === 'admin' ? 'Admin' : 'User'
+                      formData.userType === 'admin'
+                        ? 'Admin'
+                        : formData.userType === 'dispatch'
+                        ? 'Dispatch Unit'
+                        : 'User'
                     }`
                   )}
                 </button>
               </form>
 
+              {/* Registration links */}
               {formData.userType === 'user' && (
                 <div className="register-link">
                   <p>
@@ -392,74 +620,25 @@ function Login() {
                   </p>
                 </div>
               )}
+
+              {formData.userType === 'dispatch' && (
+                <div className="register-link">
+                  <p>
+                    Don't have an account?{' '}
+                    <button
+                      onClick={handleGoToDispatchRegister}
+                      className="link-btn"
+                    >
+                      Create one here
+                    </button>
+                  </p>
+                </div>
+              )}
             </div>
-
-            {/*{formData.userType === 'user' && (
-              <div className="quick-access">
-                <h3>Emergency Quick Access</h3>
-                <p>
-                  For immediate emergencies, you can access these services
-                  without logging in:
-                </p>
-                <div className="quick-access-buttons">
-                  <button
-                    className="quick-btn emergency"
-                    onClick={handleTextChat}
-                  >
-                    🚨 Emergency Chat
-                  </button>
-                  <button
-                    className="quick-btn medical"
-                    onClick={() => handleQuickAccess('medical')}
-                  >
-                    🏥 Medical Emergency
-                  </button>
-                  <button
-                    className="quick-btn fire"
-                    onClick={() => handleQuickAccess('fire')}
-                  >
-                    🔥 Fire Emergency
-                  </button>
-                  <button
-                    className="quick-btn police"
-                    onClick={() => handleQuickAccess('police')}
-                  >
-                    👮 Police Emergency
-                  </button>
-                </div>
-              </div>
-            )}*/}
-
-          {/* {formData.userType === 'admin' && (
-              <div className="admin-info">
-                <h3>Admin Access</h3>
-                <p>
-                  You are signing in as an administrator. You will have access
-                  to:
-                </p>
-                <div className="admin-features">
-                  <div className="feature-item">
-                    <span className="feature-icon">📊</span>
-                    <span>System Analytics & Reports</span>
-                  </div>
-                  <div className="feature-item">
-                    <span className="feature-icon">👥</span>
-                    <span>User Management</span>
-                  </div>
-                  <div className="feature-item">
-                    <span className="feature-icon">🚨</span>
-                    <span>Emergency Response Monitoring</span>
-                  </div>
-                  <div className="feature-item">
-                    <span className="feature-icon">⚙️</span>
-                    <span>System Configuration</span>
-                  </div>
-                </div>
-              </div>
-            )}*/}
           </div>
         </div>
 
+        {/* Forgot Password Modal */}
         {showForgotPassword && formData.userType === 'user' && (
           <div
             className="modal-overlay"

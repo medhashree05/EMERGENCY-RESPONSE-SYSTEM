@@ -4,7 +4,7 @@ import {
   Route,
   Routes,
   Navigate,
-  useLocation
+  useLocation,
 } from 'react-router-dom'
 import HomePage from './Pages/HomePage'
 import Register from './Pages/Register'
@@ -17,16 +17,19 @@ import ChatPage from './Pages/ChatPage'
 import AdminDashboard from './Pages/AdminDashboard'
 import AdminProfile from './Pages/AdminProfile'
 import AdminSettings from './Pages/AdminSettings'
+import DispatchRegister from './Pages/DispatchRegister'
+import DispatchDashboard from './Pages/DispatchDashboard'
+import DispatchProfile from './Pages/DispatchProfile'
 import 'leaflet/dist/leaflet.css'
 
 // Debug component to track navigation
 function NavigationDebug() {
   const location = useLocation()
-  
+
   useEffect(() => {
     console.log('Navigation to:', location.pathname)
   }, [location])
-  
+
   return null
 }
 
@@ -36,15 +39,18 @@ function App() {
 
   useEffect(() => {
     console.log('App useEffect - checking userType')
-    
+
     // Add a small delay to prevent immediate redirects
     setTimeout(() => {
       const storedUserType = localStorage.getItem('userType')
-      const token = localStorage.getItem('token') || localStorage.getItem('adminToken')
-      
+      const token =
+        localStorage.getItem('token') ||
+        localStorage.getItem('adminToken') ||
+        localStorage.getItem('dispatchToken')
+
       console.log('Stored userType:', storedUserType)
       console.log('Token exists:', !!token)
-      
+
       if (storedUserType && token) {
         setUserType(storedUserType)
         console.log('Setting userType to:', storedUserType)
@@ -53,25 +59,29 @@ function App() {
         localStorage.removeItem('userType')
         localStorage.removeItem('token')
         localStorage.removeItem('adminToken')
+        localStorage.removeItem('dispatchToken')
         localStorage.removeItem('user')
         setUserType('guest') // Use 'guest' instead of null
       }
-      
+
       setIsLoading(false)
     }, 100)
   }, [])
 
   if (isLoading) {
     return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100vh',
-        background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f172a 100%)',
-        color: 'white',
-        fontFamily: 'Arial, sans-serif'
-      }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          height: '100vh',
+          background:
+            'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f172a 100%)',
+          color: 'white',
+          fontFamily: 'Arial, sans-serif',
+        }}
+      >
         Loading...
       </div>
     )
@@ -85,16 +95,21 @@ function App() {
       <Routes>
         {/* Always accessible routes */}
         <Route path="/register" element={<Register />} />
+        <Route path="/dispatchregister" element={<DispatchRegister />} />
         <Route path="/login" element={<Login />} />
-        
+
         {userType === 'admin' ? (
           <>
             <Route path="/" element={<AdminDashboard />} />
             <Route path="/admin-dashboard" element={<AdminDashboard />} />
             <Route path="/admin-profile" element={<AdminProfile />} />
             <Route path="/admin-settings" element={<AdminSettings />} />
-            <Route path="/chat" element={<ChatPage />} />
-          
+          </>
+        ) : userType === 'dispatch' ? (
+          <>
+            <Route path="/" element={<DispatchDashboard />} />
+            <Route path="/dispatch-dashboard" element={<DispatchDashboard />} />
+            <Route path="/dispatch-profile" element={<DispatchProfile />} />
           </>
         ) : userType === 'user' ? (
           <>
@@ -104,7 +119,6 @@ function App() {
             <Route path="/settings" element={<Settings />} />
             <Route path="/location" element={<Location />} />
             <Route path="/chat" element={<ChatPage />} />
-            
           </>
         ) : (
           <>
