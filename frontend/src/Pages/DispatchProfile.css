@@ -1,0 +1,495 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', sans-serif;
+  line-height: 1.6;
+}
+
+.dispatch-container {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+/* Dispatch Profile Page Layout */
+.dispatch-profile-page {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #1a202c 0%, #2d3748 50%, #1a202c 100%);
+  color: white;
+}
+
+/* Loading and No Data States */
+.dispatch-loading,
+.dispatch-no-data {
+  text-align: center;
+  padding: 2rem;
+  color: #cbd5e0;
+  font-size: 1.125rem;
+}
+
+/* Header Styles */
+.dispatch-header {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+.dispatch-header-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 0;
+}
+
+.dispatch-logo-section {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.dispatch-logo {
+  width: 48px;
+  height: 48px;
+  background: #f56565;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dispatch-shield-icon {
+  font-size: 1.5rem;
+}
+
+.dispatch-logo-text h1 {
+  font-size: 1.5rem;
+  font-weight: bold;
+  margin-bottom: 0.25rem;
+}
+
+.dispatch-logo-text p {
+  font-size: 0.875rem;
+  color: #cbd5e0;
+}
+
+.dispatch-header-actions .dispatch-back-btn {
+  padding: 0.5rem 1rem;
+  background: rgba(255, 255, 255, 0.1);
+  color: #cbd5e0;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 0.5rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.dispatch-back-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+}
+
+/* Navigation Styles */
+.dispatch-navigation {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.dispatch-nav-links {
+  display: flex;
+  gap: 2rem;
+  padding: 0.75rem 0;
+}
+
+.dispatch-nav-link {
+  background: none;
+  border: none;
+  color: #cbd5e0;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0.5rem 0;
+  position: relative;
+  transition: color 0.3s ease;
+}
+
+.dispatch-nav-link:hover {
+  color: white;
+}
+
+.dispatch-nav-link.active {
+  color: white;
+  font-weight: 600;
+}
+
+.dispatch-nav-link.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #f56565;
+}
+
+/* Main Content */
+.dispatch-main-content {
+  padding: 3rem 0;
+}
+
+/* Profile Header */
+.dispatch-profile-header {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  margin-bottom: 3rem;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 1rem;
+  padding: 2rem;
+}
+
+.dispatch-profile-avatar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 80px;
+}
+
+.dispatch-avatar-circle {
+  width: 120px;
+  height: 120px;
+  background: linear-gradient(135deg, #f56565, #e53e3e);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 25px rgba(245, 101, 101, 0.4);
+}
+
+.dispatch-avatar-initials {
+  font-size: 2.5rem;
+  font-weight: bold;
+  color: white;
+}
+
+.dispatch-profile-info {
+  flex: 1;
+}
+
+.dispatch-profile-info h2 {
+  font-size: 2.5rem;
+  font-weight: bold;
+  margin-bottom: 0.5rem;
+}
+
+.dispatch-profile-unit-type {
+  font-size: 1.25rem;
+  color: #f56565;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.dispatch-profile-location {
+  font-size: 1.125rem;
+  color: #cbd5e0;
+  margin-bottom: 1.5rem;
+}
+
+.dispatch-profile-actions {
+  display: flex;
+  gap: 1rem;
+}
+
+.dispatch-edit-btn, .dispatch-save-btn, .dispatch-cancel-btn {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 0.5rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.dispatch-edit-btn {
+  background: linear-gradient(135deg, #4299e1, #3182ce);
+  color: white;
+}
+
+.dispatch-edit-btn:hover {
+  background: linear-gradient(135deg, #3182ce, #2c5282);
+  transform: translateY(-1px);
+}
+
+.dispatch-save-btn {
+  background: linear-gradient(135deg, #48bb78, #38a169);
+  color: white;
+}
+
+.dispatch-save-btn:hover {
+  background: linear-gradient(135deg, #38a169, #2f855a);
+  transform: translateY(-1px);
+}
+
+.dispatch-cancel-btn {
+  background: rgba(255, 255, 255, 0.1);
+  color: #cbd5e0;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.dispatch-cancel-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+}
+
+.dispatch-edit-actions {
+  display: flex;
+  gap: 1rem;
+}
+
+/* Profile Form */
+.dispatch-profile-form {
+  margin-bottom: 3rem;
+}
+
+.dispatch-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+}
+
+.dispatch-form-section {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 1rem;
+  padding: 2rem;
+}
+
+.dispatch-form-section.dispatch-full-width {
+  grid-column: 1 / -1;
+}
+
+.dispatch-form-section h3 {
+  font-size: 1.5rem;
+  font-weight: bold;
+  margin-bottom: 1.5rem;
+  color: white;
+}
+
+.dispatch-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.dispatch-form-group {
+  margin-bottom: 1.5rem;
+}
+
+.dispatch-form-group label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: #cbd5e0;
+}
+
+.dispatch-form-input, .dispatch-form-textarea, .dispatch-form-select {
+  width: 100%;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 0.5rem;
+  color: white;
+  font-size: 1rem;
+  transition: all 0.3s ease;
+}
+
+.dispatch-form-input::placeholder,
+.dispatch-form-textarea::placeholder {
+  color: #a0aec0;
+}
+
+.dispatch-form-input:focus,
+.dispatch-form-textarea:focus,
+.dispatch-form-select:focus {
+  outline: none;
+  border-color: #63b3ed;
+  background: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 0 0 3px rgba(99, 179, 237, 0.1);
+}
+
+.dispatch-form-input:disabled,
+.dispatch-form-textarea:disabled,
+.dispatch-form-select:disabled {
+  background: rgba(255, 255, 255, 0.05);
+  color: #a0aec0;
+  cursor: not-allowed;
+}
+
+.dispatch-form-textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.dispatch-form-select option {
+  background: #2d3748;
+  color: white;
+}
+
+/* Profile Stats */
+.dispatch-profile-stats h3 {
+  font-size: 1.5rem;
+  font-weight: bold;
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.dispatch-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.5rem;
+}
+
+.dispatch-stat-card {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  transition: all 0.3s ease;
+}
+
+.dispatch-stat-card:hover {
+  background: rgba(255, 255, 255, 0.15);
+  transform: translateY(-2px);
+}
+
+.dispatch-stat-icon {
+  width: 60px;
+  height: 60px;
+  background: linear-gradient(135deg, #f56565, #e53e3e);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+}
+
+.dispatch-stat-content h4 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+  color: #cbd5e0;
+}
+
+.dispatch-stat-number {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: white;
+  margin-bottom: 0.25rem;
+}
+
+.dispatch-stat-subtitle {
+  font-size: 0.875rem;
+  color: #a0aec0;
+}
+
+/* Footer */
+.dispatch-footer {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin-top: 4rem;
+}
+
+.dispatch-footer-content {
+  text-align: center;
+  padding: 2rem 0;
+}
+
+.dispatch-footer-content p {
+  color: #cbd5e0;
+}
+
+.dispatch-footer-subtitle {
+  font-size: 0.875rem;
+  color: #a0aec0;
+  margin-top: 0.5rem;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .dispatch-profile-header {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .dispatch-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dispatch-form-row {
+    grid-template-columns: 1fr;
+  }
+
+  .dispatch-stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dispatch-nav-links {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 1rem;
+  }
+
+  .dispatch-profile-info h2 {
+    font-size: 2rem;
+  }
+
+  .dispatch-edit-actions {
+    flex-direction: column;
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .dispatch-container {
+    padding: 0 15px;
+  }
+
+  .dispatch-main-content {
+    padding: 2rem 0;
+  }
+
+  .dispatch-profile-header {
+    padding: 1.5rem;
+  }
+
+  .dispatch-form-section {
+    padding: 1.5rem;
+  }
+
+  .dispatch-avatar-circle {
+    width: 100px;
+    height: 100px;
+  }
+
+  .dispatch-avatar-initials {
+    font-size: 2rem;
+  }
+
+  .dispatch-profile-info h2 {
+    font-size: 1.75rem;
+  }
+}

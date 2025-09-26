@@ -3016,7 +3016,7 @@ app.post('/dispatch/verify_otp', async (req, res) => {
       .insert([
         {
           ...record.dispatchData,
-          password_hash: hashedPassword,
+          password: hashedPassword,
           is_active: true,
           is_verified: true,
           registered_at: new Date().toISOString(),
@@ -3152,8 +3152,12 @@ app.post('/dispatch/resend_otp', async (req, res) => {
 // ===========================================
 
 function authenticateDispatchUnit(req, res, next) {
-  const authHeader = req.headers['authorization']
-  const token = authHeader && authHeader.split(' ')[1]
+  
+const authHeader = req.headers['authorization']
+console.log("Authorization header:", authHeader)
+
+const token = authHeader && authHeader.split(' ')[1]
+console.log("Extracted token:", token)
 
   if (!token) {
     return res.status(401).json({
@@ -3305,7 +3309,7 @@ app.post('/dispatch/login', async (req, res) => {
     // Verify password
     const isValidPassword = await bcrypt.compare(
       password,
-      dispatch.password_hash
+      dispatch.password
     )
 
     if (!isValidPassword) {
@@ -3360,7 +3364,7 @@ app.post('/dispatch/login', async (req, res) => {
     }
 
     const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, {
-      expiresIn: '8h',
+      expiresIn: '8d',
       issuer: 'emergency-dispatch-system',
       audience: 'dispatch-units',
     })
@@ -3428,7 +3432,7 @@ app.put(
       // Get current unit data
       const { data: unit, error } = await supabase
         .from('dispatch_units')
-        .select('password_hash')
+        .select('password')
         .eq('id', req.unit.unit_id)
         .single()
 
@@ -3439,7 +3443,7 @@ app.put(
       // Verify current password
       const isValidPassword = await bcrypt.compare(
         current_password,
-        unit.password_hash
+        unit.password
       )
       if (!isValidPassword) {
         return res.status(401).json({ error: 'Current password is incorrect' })
@@ -3452,7 +3456,7 @@ app.put(
       const { error: updateError } = await supabase
         .from('dispatch_units')
         .update({
-          password_hash: hashedNewPassword,
+          password: hashedNewPassword,
           updated_at: new Date().toISOString(),
         })
         .eq('id', req.unit.unit_id)
@@ -3501,3 +3505,365 @@ app.post('/dispatch/logout', authenticateDispatchUnit, async (req, res) => {
 app.listen(PORT, () =>
   console.log(`🚀 Server running on http://localhost:${PORT}`)
 )
+// Add these missing routes to your backend/index.js
+
+// ===========================================
+// DISPATCH DASHBOARD ROUTES
+// ===========================================
+
+// Get dispatch unit profile
+app.get('/dispatch/profile/me', authenticateDispatchUnit, async (req, res) => {
+  try {
+    const { unit_id } = req.unit
+
+    const { data: unit, error } = await supabase
+      .from('dispatch_units')
+      .select('*')
+      .eq('id', unit_id)
+      .single()
+
+    if (error || !unit) {
+      return res.status(404).json({ error: 'Dispatch unit not found' })
+    }
+
+    // Format response to match frontend expectations
+    res.json({
+      id: unit.id,
+      department_name: unit.department_name,
+      unit_type: unit.unit_type,
+      place: unit.place,
+      district: unit.district,
+      state: unit.state,
+      pincode: unit.pincode,
+      username: unit.username,
+      official_email: unit.email,
+      primary_contact: unit.contact_number,
+      alternate_contact: unit.alternate_contact_number,
+      officer_name: unit.officer_in_charge,
+      officer_contact: unit.officer_contact,
+      vehicle_count: unit.vehicle_count || 0,
+      response_count: unit.response_count || 0,
+      total_responses: unit.total_responses || 0,
+      active_status: unit.is_active ? 'Active' : 'Inactive',
+    })
+  } catch (err) {
+    console.error('Get dispatch profile error:', err)
+    res.status(500).json({ error: 'Failed to fetch profile' })
+  }
+})
+
+// Update dispatch unit profile
+app.put('/dispatch/profile/me', authenticateDispatchUnit, async (req, res) => {
+  try {
+    const { unit_id } = req.unit
+    const {
+      department_name,
+      unit_type,
+      place,
+      district,
+      state,
+      pincode,
+      username,
+      official_email,
+      primary_contact,
+      alternate_contact,
+      officer_name,
+      officer_contact,
+      vehicle_count,
+    } = req.body
+
+    // Validate required fields
+    if (!department_name || !unit_type || !place || !district || !state) {
+      return res.status(400).json({ error: 'Missing required fields' })
+    }
+
+    const updateData = {
+      department_name,
+      unit_type,
+      place,
+      district,
+      state,
+      pincode,
+      username: username?.toLowerCase().trim(),
+      email: official_email?.toLowerCase().trim(),
+      contact_number: primary_contact,
+      alternate_contact_number: alternate_contact,
+      officer_in_charge: officer_name,
+      officer_contact,
+      vehicle_count: vehicle_count ? parseInt(vehicle_count) : 0,
+      updated_at: new Date().toISOString(),
+    }
+
+    const { error } = await supabase
+      .from('dispatch_units')
+      .update(updateData)
+      .eq('id', unit_id)
+
+    if (error) {
+      console.error('Profile update error:', error)
+      return res.status(500).json({ error: 'Failed to update profile' })
+    }
+
+    res.json({ message: 'Profile updated successfully' })
+  } catch (err) {
+    console.error('Update dispatch profile error:', err)
+    res.status(500).json({ error: 'Failed to update profile' })
+  }
+})
+
+// Get dispatch vehicles
+app.get('/dispatch/vehicles', authenticateDispatchUnit, async (req, res) => {
+  try {
+    const { unit_id } = req.unit
+
+    const { data: vehicles, error } = await supabase
+      .from('dispatch_vehicles')
+      .select('*')
+      .eq('dispatch_unit_id', unit_id)
+      .order('vehicle_id', { ascending: true })
+
+    if (error) {
+      console.error('Vehicles fetch error:', error)
+      return res.status(500).json({ error: 'Failed to fetch vehicles' })
+    }
+
+    res.json(vehicles || [])
+  } catch (err) {
+    console.error('Get vehicles error:', err)
+    res.status(500).json({ error: 'Failed to fetch vehicles' })
+  }
+})
+
+// Get request statistics for dispatch dashboard
+app.get('/dispatch/requests/stats', authenticateDispatchUnit, async (req, res) => {
+  try {
+    const { unit_id } = req.unit
+    const today = new Date().toISOString().split('T')[0] // YYYY-MM-DD format
+
+    // Get pending requests (not yet accepted by any dispatch unit)
+    const { data: pendingRequests, error: pendingError } = await supabase
+      .from('emergencies')
+      .select('id')
+      .eq('status', 'Pending')
+      .is('dispatch_unit_id', null)
+
+    if (pendingError) {
+      console.error('Pending requests error:', pendingError)
+    }
+
+    // Get accepted requests by this unit
+    const { data: acceptedRequests, error: acceptedError } = await supabase
+      .from('emergencies')
+      .select('id')
+      .eq('dispatch_unit_id', unit_id)
+      .in('status', ['Accepted', 'Dispatched', 'En Route', 'On Scene'])
+
+    if (acceptedError) {
+      console.error('Accepted requests error:', acceptedError)
+    }
+
+    // Get completed requests today
+    const { data: completedToday, error: completedError } = await supabase
+      .from('emergencies')
+      .select('id')
+      .eq('dispatch_unit_id', unit_id)
+      .eq('status', 'Completed')
+      .gte('completed_at', today + 'T00:00:00.000Z')
+      .lt('completed_at', today + 'T23:59:59.999Z')
+
+    if (completedError) {
+      console.error('Completed requests error:', completedError)
+    }
+
+    res.json({
+      pending: pendingRequests?.length || 0,
+      accepted: acceptedRequests?.length || 0,
+      completed_today: completedToday?.length || 0,
+    })
+  } catch (err) {
+    console.error('Request stats error:', err)
+    res.status(500).json({ error: 'Failed to fetch request statistics' })
+  }
+})
+
+// Get received requests (available for acceptance)
+app.get('/dispatch/requests/received', authenticateDispatchUnit, async (req, res) => {
+  try {
+    const { unit_id } = req.unit
+
+    // Get pending requests not yet accepted by any dispatch unit
+    const { data: requests, error } = await supabase
+      .from('emergencies')
+      .select(`
+        id,
+        type,
+        location,
+        requester_name,
+        requester_phone,
+        priority,
+        requested_at,
+        description
+      `)
+      .eq('status', 'Pending')
+      .is('dispatch_unit_id', null)
+      .order('requested_at', { ascending: false })
+
+    if (error) {
+      console.error('Received requests error:', error)
+      return res.status(500).json({ error: 'Failed to fetch received requests' })
+    }
+
+    res.json(requests || [])
+  } catch (err) {
+    console.error('Get received requests error:', err)
+    res.status(500).json({ error: 'Failed to fetch received requests' })
+  }
+})
+
+// Get accepted requests by this dispatch unit
+app.get('/dispatch/requests/accepted', authenticateDispatchUnit, async (req, res) => {
+  try {
+    const { unit_id } = req.unit
+
+    const { data: requests, error } = await supabase
+      .from('emergencies')
+      .select(`
+        id,
+       type,
+        location,
+        requester_name,
+        requester_phone,
+        priority,
+        status,
+        accepted_at,
+        assigned_vehicle,
+        estimated_arrival,
+        response_notes
+      `)
+      .eq('dispatch_unit_id', unit_id)
+      .in('status', ['Accepted', 'Dispatched', 'En Route', 'On Scene', 'Completed'])
+      .order('accepted_at', { ascending: false })
+
+    if (error) {
+      console.error('Accepted requests error:', error)
+      return res.status(500).json({ error: 'Failed to fetch accepted requests' })
+    }
+
+    res.json(requests || [])
+  } catch (err) {
+    console.error('Get accepted requests error:', err)
+    res.status(500).json({ error: 'Failed to fetch accepted requests' })
+  }
+})
+
+// Accept an emergency request
+app.post('/dispatch/requests/:requestId/accept', authenticateDispatchUnit, async (req, res) => {
+  try {
+    const { requestId } = req.params
+    const { unit_id } = req.unit
+    const { accepted_by } = req.body
+
+    // First check if the request is still available
+    const { data: existingRequest, error: fetchError } = await supabase
+      .from('emergencies')
+      .select('id, status, dispatch_unit_id')
+      .eq('id', requestId)
+      .single()
+
+    if (fetchError || !existingRequest) {
+      return res.status(404).json({ error: 'Emergency request not found' })
+    }
+
+    if (existingRequest.status !== 'Pending' || existingRequest.dispatch_unit_id) {
+      return res.status(400).json({ 
+        error: 'Request has already been accepted by another unit' 
+      })
+    }
+
+    // Accept the request
+    const { error: updateError } = await supabase
+      .from('emergencies')
+      .update({
+        status: 'Accepted',
+        dispatch_unit_id: unit_id,
+        accepted_at: new Date().toISOString(),
+        accepted_by: accepted_by || 'Dispatch Unit',
+      })
+      .eq('id', requestId)
+      .eq('status', 'Pending') // Double-check it's still pending
+
+    if (updateError) {
+      console.error('Accept request error:', updateError)
+      return res.status(500).json({ error: 'Failed to accept request' })
+    }
+
+    // Update dispatch unit's response count
+    await supabase
+      .from('dispatch_units')
+      .update({
+        response_count: supabase.rpc('increment_response_count', { unit_id }),
+        last_activity: new Date().toISOString(),
+      })
+      .eq('id', unit_id)
+
+    console.log(`Request ${requestId} accepted by unit ${unit_id}`)
+    res.json({ message: 'Request accepted successfully' })
+  } catch (err) {
+    console.error('Accept request error:', err)
+    res.status(500).json({ error: 'Failed to accept request' })
+  }
+})
+
+// Update an emergency request
+app.put('/dispatch/requests/:requestId/update', authenticateDispatchUnit, async (req, res) => {
+  try {
+    const { requestId } = req.params
+    const { unit_id } = req.unit
+    const { status, response_notes, assigned_vehicle, completed_at } = req.body
+
+    // Verify the request belongs to this dispatch unit
+    const { data: request, error: fetchError } = await supabase
+      .from('emergencies')
+      .select('id, dispatch_unit_id')
+      .eq('id', requestId)
+      .single()
+
+    if (fetchError || !request) {
+      return res.status(404).json({ error: 'Request not found' })
+    }
+
+    if (request.dispatch_unit_id !== unit_id) {
+      return res.status(403).json({ 
+        error: 'You can only update requests assigned to your unit' 
+      })
+    }
+
+    const updateData = {
+      status,
+      response_notes,
+      assigned_vehicle,
+      updated_at: new Date().toISOString(),
+    }
+
+    if (completed_at && status === 'Completed') {
+      updateData.completed_at = completed_at
+    }
+
+    const { error: updateError } = await supabase
+      .from('emergencies')
+      .update(updateData)
+      .eq('id', requestId)
+
+    if (updateError) {
+      console.error('Update request error:', updateError)
+      return res.status(500).json({ error: 'Failed to update request' })
+    }
+
+    res.json({ message: 'Request updated successfully' })
+  } catch (err) {
+    console.error('Update request error:', err)
+    res.status(500).json({ error: 'Failed to update request' })
+  }
+})
+
+
