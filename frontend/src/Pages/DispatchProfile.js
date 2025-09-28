@@ -135,8 +135,8 @@ function DispatchProfile() {
           <div className="dispatch-nav-links">
             <button className="dispatch-nav-link" onClick={() => navigate('/dispatch-dashboard')}>Dashboard</button>
             <button className="dispatch-nav-link active">Profile</button>
-            <button className="dispatch-nav-link" onClick={() => navigate('/dispatch-responses')}>Responses</button>
-            <button className="dispatch-nav-link" onClick={() => navigate('/dispatch-vehicles')}>Vehicles</button>
+            
+           
           </div>
         </div>
       </nav>
