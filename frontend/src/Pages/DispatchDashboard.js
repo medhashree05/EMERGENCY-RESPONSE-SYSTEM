@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import './DispatchDashboard.css'
-
+import { supabase } from '../supabaseClient'
 function DispatchDashboard() {
   const [currentTime, setCurrentTime] = useState(new Date())
   const [dispatchData, setDispatchData] = useState(null)
+  const [selectedVehicleId, setSelectedVehicleId] = useState('')
   const [systemStats, setSystemStats] = useState({
     totalVehicles: 0,
     availableVehicles: 0,
@@ -25,6 +26,13 @@ function DispatchDashboard() {
   const [showViewModal, setShowViewModal] = useState(false)
   const [selectedRequest, setSelectedRequest] = useState(null)
   const [viewRequest, setViewRequest] = useState(null)
+  const [showMessageModal, setShowMessageModal] = useState(false)
+const [messageData, setMessageData] = useState({
+  emergency_id: '',
+  message: '',
+  status: '',
+})
+const [sendingMessage, setSendingMessage] = useState(false)
   const [updateData, setUpdateData] = useState({
     status: '',
     response_notes: '',
@@ -77,15 +85,16 @@ function DispatchDashboard() {
         id: data.id,
         departmentName: data.department_name,
         unitType: data.unit_type,
-        place: data.place,
+        place: data.city,
         district: data.district,
         state: data.state,
-        officerName: data.officer_name,
+        officerName: data.officer_in_charge,
         primaryContact: data.primary_contact,
         vehicleCount: data.vehicle_count || 0,
         responseCount: data.response_count || 0,
         activeStatus: data.active_status || 'Active',
       })
+     
     } catch (error) {
       console.error('Error loading dispatch data:', error)
     } finally {
@@ -130,75 +139,96 @@ function DispatchDashboard() {
   }
 
   const loadReceivedRequests = async () => {
-    try {
-      setRequestsLoading(true)
-      const token = localStorage.getItem("dispatchToken") || localStorage.getItem('token')
+  try {
+    setRequestsLoading(true);
+    const token = localStorage.getItem("dispatchToken") || localStorage.getItem("token") ;
 
-      const res = await fetch('http://localhost:8000/dispatch/requests/received', {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      })
+    console.log('[DEBUG] Fetching received requests with token:', token);
 
-      if (!res.ok) throw new Error('Failed to fetch received requests')
-      const data = await res.json()
+    const res = await fetch('http://localhost:8000/dispatch/requests/received', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
 
-      const formattedRequests = data.map((request) => ({
-        id: request.id,
-        emergencyType: request.emergency_type || 'Unknown',
-        location: request.location || 'Unknown Location',
-        requesterName: request.requester_name || 'Unknown',
-        requesterPhone: request.requester_phone || 'N/A',
-        priority: request.priority || 'Medium',
-        requestedAt: request.requested_at,
-        time: formatTimeAgo(request.requested_at),
-        description: request.description || '',
-        rawData: request,
-      }))
+    console.log('[DEBUG] Fetch response status:', res.status);
 
-      setReceivedRequests(formattedRequests)
-    } catch (error) {
-      console.error('Error loading received requests:', error)
-    } finally {
-      setRequestsLoading(false)
+    if (!res.ok) {
+      // Try to read the response body to get error details
+      const errorText = await res.text();
+      console.error('[ERROR] Failed to fetch received requests. Response body:', errorText);
+      throw new Error('Failed to fetch received requests');
     }
+
+    const data = await res.json();
+    console.log('[DEBUG] Received requests data:', data);
+
+    const formattedRequests = data.map((request) => ({
+      id: request.id,
+      emergencyType: request.emergency_type || 'Unknown',
+      location: request.location || 'Unknown Location',
+      requesterName: request.requester_name || 'Unknown',
+      requesterPhone: request.requester_phone || 'N/A',
+      priority: request.priority || 'Medium',
+      requestedAt: request.requested_at,
+      time: formatTimeAgo(request.requested_at),
+      description: request.description || '',
+      rawData: request,
+    }));
+
+    setReceivedRequests(formattedRequests);
+  } catch (error) {
+    console.error('[ERROR] Error loading received requests:', error);
+  } finally {
+    setRequestsLoading(false);
   }
+};
 
   const loadAcceptedRequests = async () => {
-    try {
-      const token = localStorage.getItem("dispatchToken") || localStorage.getItem('token')
+  try {
+    console.log('🟡 [Frontend] Loading accepted requests...')
+    const token = localStorage.getItem("dispatchToken") || localStorage.getItem("token");
 
-      const res = await fetch('http://localhost:8000/dispatch/requests/accepted', {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      })
+    const res = await fetch('http://localhost:8000/dispatch/requests/accepted', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    
+    console.log('🟡 [Frontend] Accepted requests response status:', res.status)
 
-      if (!res.ok) throw new Error('Failed to fetch accepted requests')
-      const data = await res.json()
-
-      const formattedRequests = data.map((request) => ({
+    if (!res.ok) throw new Error('Failed to fetch accepted requests')
+    const data = await res.json()
+    console.log('[DEBUG] Raw accepted requests data:', data);
+    console.log('[DEBUG] Number of accepted requests:', data.length);
+console.log('[DEBUG] Processing request:', data.id, data);
+    const formattedRequests = data.map(request => {
+      
+      return {
         id: request.id,
         emergencyType: request.emergency_type || 'Unknown',
         location: request.location || 'Unknown Location',
         requesterName: request.requester_name || 'Unknown',
         requesterPhone: request.requester_phone || 'N/A',
-        priority: request.priority || 'Medium',
+        priority: request.emergencies?.priority || 'Medium',
         status: request.status || 'Accepted',
         acceptedAt: request.accepted_at,
         assignedVehicle: request.assigned_vehicle || 'Unassigned',
         estimatedArrival: request.estimated_arrival || '',
         responseNotes: request.response_notes || '',
-        time: formatTimeAgo(request.accepted_at),
+        time: formatTimeAgo(request.completed_at),
         rawData: request,
-      }))
+      }
+    });
 
-      setAcceptedRequests(formattedRequests)
-    } catch (error) {
-      console.error('Error loading accepted requests:', error)
-    }
+    console.log('🟢 [Frontend] Formatted accepted requests:', formattedRequests);
+    console.log('🟢 [Frontend] Setting accepted requests count:', formattedRequests.length);
+    setAcceptedRequests(formattedRequests)
+  } catch (error) {
+    console.log(error)
+    console.error('🔴 [Frontend] Error loading accepted requests:', error)
   }
-
+}
   const loadVehicles = async () => {
     try {
       const token = localStorage.getItem("dispatchToken") || localStorage.getItem('token')
@@ -233,62 +263,182 @@ function DispatchDashboard() {
     return `${diffInDays} days ago`
   }
 
-  const handleAcceptRequest = async (requestId) => {
-    if (!dispatchData?.id) {
-      alert('Dispatch data not loaded. Please refresh and try again.')
-      return
+const handleAcceptRequest = async (requestId) => {
+  console.log('🔵 [Frontend] Starting accept request for ID:', requestId)
+  
+  setAcceptingRequest(requestId)
+
+  try {
+    const token = localStorage.getItem("dispatchToken") || localStorage.getItem("token")
+    console.log('🔵 [Frontend] Using token:', token ? 'Token found' : 'No token found')
+    
+    const requestPayload = {
+      accepted_by: dispatchData?.officerName || 'Dispatch Unit'
     }
+    console.log('🔵 [Frontend] Request payload:', requestPayload)
 
-    setAcceptingRequest(requestId)
+    const acceptRes = await fetch(`http://localhost:8000/dispatch/requests/${requestId}/accept`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(requestPayload),
+    })
 
-    try {
-      const token = localStorage.getItem("dispatchToken") || localStorage.getItem('token')
+    console.log('🔵 [Frontend] Response status:', acceptRes.status)
 
-      const res = await fetch(`http://localhost:8000/dispatch/requests/${requestId}/accept`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          dispatch_unit_id: dispatchData.id,
-          accepted_by: dispatchData.officerName,
-        }),
-      })
-
-      if (!res.ok) throw new Error('Failed to accept request')
-
-      alert('Request accepted successfully!')
+    if (!acceptRes.ok) {
+      const errorData = await acceptRes.json()
+      console.error('🔴 [Frontend] Accept request failed:', errorData)
       
-      // Refresh data
-      loadReceivedRequests()
-      loadAcceptedRequests()
-      loadSystemStats()
-    } catch (error) {
-      console.error('Error accepting request:', error)
+      // Handle specific error cases
+      if (acceptRes.status === 400 && errorData.error?.includes('already been accepted')) {
+        alert('This emergency has already been accepted by another unit. The request will be removed from your list.')
+        // Refresh the data to remove the accepted request
+        loadReceivedRequests()
+        loadAcceptedRequests()
+        loadSystemStats()
+        return
+      }
+      
+      throw new Error(errorData.error || 'Failed to accept request')
+    }
+
+    const acceptData = await acceptRes.json()
+    console.log('🟢 [Frontend] Accept response data:', acceptData)
+
+    alert('Request accepted successfully!')
+    
+    // Refresh all data
+    loadReceivedRequests()
+    loadAcceptedRequests()
+    loadSystemStats()
+
+  } catch (error) {
+    console.error('🔴 [Frontend] Error in handleAcceptRequest:', error)
+    if (!error.message.includes('already been accepted')) {
       alert('Failed to accept request. Please try again.')
-    } finally {
-      setAcceptingRequest(null)
     }
+  } finally {
+    setAcceptingRequest(null)
   }
-
+}
   const handleRequestAction = (requestId, action) => {
-    const request = acceptedRequests.find((r) => r.id === requestId)
-    if (!request) return
+  const request = acceptedRequests.find((r) => r.id === requestId)
+  if (!request) return
 
-    if (action === 'view') {
-      setViewRequest(request)
-      setShowViewModal(true)
-    } else if (action === 'update') {
-      setSelectedRequest(request)
-      setUpdateData({
-        status: request.status,
-        response_notes: request.responseNotes || '',
-        assigned_vehicle: request.assignedVehicle || '',
-      })
-      setShowUpdateModal(true)
-    }
+  if (action === 'view') {
+    setViewRequest(request)
+    setShowViewModal(true)
+  } else if (action === 'update') {
+    setSelectedRequest(request)
+    setUpdateData({
+      status: request.status,
+      response_notes: request.responseNotes || '',
+      assigned_vehicle: request.assignedVehicle || '',
+    })
+    setShowUpdateModal(true)
+  } else if (action === 'message') {
+    setMessageData({
+      emergency_id: request.rawData.emergency_id,
+      message: '',
+      status: request.status,
+    })
+    setShowMessageModal(true)
   }
+}
+const handleAssignVehicle = async (requestId) => {
+  if (!selectedVehicleId) return
+
+  try {
+    const token = localStorage.getItem("dispatchToken") || localStorage.getItem("token")
+    
+    // Get request details
+    const request = acceptedRequests.find(r => r.id === requestId)
+    
+    // Update emergency with vehicle assignment
+    await supabase
+      .from('emergencies')
+      .update({
+        assigned_vehicle: selectedVehicleId,
+        status: 'Dispatched',
+        estimated_arrival: new Date(Date.now() + 15 * 60 * 1000).toISOString()
+      })
+      .eq('id', request.rawData.emergency_id)
+
+    // Update vehicle status to unavailable
+    await supabase
+      .from('dispatch_vehicles') // or dispatch_units depending on your structure
+      .update({ status: 'On Duty' })
+      .eq('vehicle_id', selectedVehicleId)
+
+    // Update dispatch request
+    await fetch(`http://localhost:8000/dispatch/requests/${requestId}/update`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        assigned_vehicle: selectedVehicleId,
+        status: 'Dispatched'
+      }),
+    })
+
+    alert('Vehicle assigned successfully!')
+    setShowViewModal(false)
+    loadAcceptedRequests()
+    loadVehicles()
+    
+  } catch (error) {
+    console.error('Error assigning vehicle:', error)
+  }
+}
+
+// New function to send message to admin
+const handleSendMessage = async () => {
+  if (!messageData.message.trim()) {
+    alert('Please enter a message')
+    return
+  }
+
+  setSendingMessage(true)
+
+  try {
+    const token = localStorage.getItem("dispatchToken") || localStorage.getItem("token")
+
+    const messagePayload = {
+      emergency_id: messageData.emergency_id,
+      message: messageData.message,
+      dispatch_unit_id: dispatchData.id,
+      sent_by: dispatchData.officerName,
+      sent_at: new Date().toISOString(),
+      message_type: 'dispatch_to_admin',
+    }
+
+    const res = await fetch('http://localhost:8000/dispatch/send-message', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(messagePayload),
+    })
+
+    if (!res.ok) throw new Error('Failed to send message')
+
+    alert('Message sent to admin successfully!')
+    setShowMessageModal(false)
+    setMessageData({ emergency_id: '', message: '', status: '' })
+
+  } catch (error) {
+    console.error('Error sending message:', error)
+    alert('Failed to send message. Please try again.')
+  } finally {
+    setSendingMessage(false)
+  }
+}
 
   const handleUpdateRequest = async () => {
     if (!selectedRequest || !dispatchData?.id) {
@@ -355,7 +505,7 @@ function DispatchDashboard() {
 
   const handleLogout = () => {
     localStorage.removeItem('dispatchToken')
-    navigate('/dispatch-login')
+    navigate('/login')
   }
 
   const getStatusColor = (status) => {
@@ -717,20 +867,26 @@ function DispatchDashboard() {
                       <span className="dispatch-time-info">{request.time}</span>
                     </div>
                     <div className="dispatch-table-cell">
-                      <button
-                        className="dispatch-action-btn dispatch-view-btn"
-                        onClick={() => handleRequestAction(request.id, 'view')}
-                      >
-                        View
-                      </button>
-                      <button
-                        className="dispatch-action-btn dispatch-update-btn"
-                        onClick={() => handleRequestAction(request.id, 'update')}
-                        disabled={updatingRequest === request.id}
-                      >
-                        {updatingRequest === request.id ? 'Updating...' : 'Update'}
-                      </button>
-                    </div>
+  <button
+    className="dispatch-action-btn dispatch-view-btn"
+    onClick={() => handleRequestAction(request.id, 'view')}
+  >
+    View
+  </button>
+  <button
+    className="dispatch-action-btn dispatch-update-btn"
+    onClick={() => handleRequestAction(request.id, 'update')}
+    disabled={updatingRequest === request.id}
+  >
+    {updatingRequest === request.id ? 'Updating...' : 'Update'}
+  </button>
+  <button
+    className="dispatch-action-btn dispatch-message-btn"
+    onClick={() => handleRequestAction(request.id, 'message')}
+  >
+    Message Admin
+  </button>
+</div>
                   </div>
                 ))
               )}
@@ -738,7 +894,71 @@ function DispatchDashboard() {
           </section>
         </div>
       </main>
-
+{showMessageModal && (
+  <div className="dispatch-modal-overlay">
+    <div className="dispatch-modal">
+      <div className="dispatch-modal-header">
+        <h3>Send Message to Admin</h3>
+        <button
+          className="dispatch-modal-close"
+          onClick={() => setShowMessageModal(false)}
+        >
+          ×
+        </button>
+      </div>
+      <div className="dispatch-modal-content">
+        <div className="dispatch-form-group">
+          <label htmlFor="message">Message:</label>
+          <textarea
+            id="message"
+            value={messageData.message}
+            onChange={(e) => setMessageData({ ...messageData, message: e.target.value })}
+            className="dispatch-form-textarea"
+            placeholder="Enter message for admin (e.g., 'Vehicle dispatched and en route', 'Unable to dispatch due to vehicle unavailability', etc.)"
+            rows="4"
+          />
+        </div>
+        <div className="dispatch-message-templates">
+          <h4>Quick Templates:</h4>
+          <button 
+            className="dispatch-template-btn"
+            onClick={() => setMessageData({ ...messageData, message: 'Vehicle has been dispatched and is en route to the location.' })}
+          >
+            Vehicle Dispatched
+          </button>
+          <button 
+            className="dispatch-template-btn"
+            onClick={() => setMessageData({ ...messageData, message: 'Vehicle has arrived at the scene and is responding.' })}
+          >
+            Arrived at Scene
+          </button>
+          <button 
+            className="dispatch-template-btn"
+            onClick={() => setMessageData({ ...messageData, message: 'Unable to dispatch vehicle due to unavailability. Please reassign.' })}
+          >
+            Unable to Dispatch
+          </button>
+        </div>
+      </div>
+      <div className="dispatch-modal-actions">
+        <button
+          className="dispatch-modal-btn dispatch-cancel-btn"
+          onClick={() => setShowMessageModal(false)}
+          disabled={sendingMessage}
+        >
+          Cancel
+        </button>
+        <button
+          className="dispatch-modal-btn dispatch-save-btn"
+          onClick={handleSendMessage}
+          disabled={sendingMessage || !messageData.message.trim()}
+        >
+          {sendingMessage ? 'Sending...' : 'Send Message'}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
       {/* Vehicle Modal */}
       {showVehicleModal && (
         <div className="dispatch-modal-overlay">
@@ -842,6 +1062,37 @@ function DispatchDashboard() {
                   </div>
                 </div>
               </div>
+              // Add to the view modal content:
+<div className="dispatch-view-section">
+  <h4>Vehicle Assignment</h4>
+  {!viewRequest.assignedVehicle || viewRequest.assignedVehicle === 'Unassigned' ? (
+    <div className="dispatch-vehicle-assignment">
+      <select 
+        value={selectedVehicleId} 
+        onChange={(e) => setSelectedVehicleId(e.target.value)}
+        className="dispatch-form-select"
+      >
+        <option value="">Select Vehicle</option>
+        {vehicles.filter(v => v.status === 'Available').map(vehicle => (
+          <option key={vehicle.id} value={vehicle.vehicle_id}>
+            {vehicle.vehicle_id} - {vehicle.vehicle_type}
+          </option>
+        ))}
+      </select>
+      <button 
+        onClick={() => handleAssignVehicle(viewRequest.id)}
+        className="dispatch-assign-btn"
+        disabled={!selectedVehicleId}
+      >
+        Assign Vehicle
+      </button>
+    </div>
+  ) : (
+    <div className="dispatch-assigned-vehicle">
+      <p>Assigned Vehicle: <strong>{viewRequest.assignedVehicle}</strong></p>
+    </div>
+  )}
+</div>
 
               {viewRequest.responseNotes && (
                 <div className="dispatch-view-section">
@@ -908,24 +1159,7 @@ function DispatchDashboard() {
                   </select>
                 </div>
 
-                <div className="dispatch-form-group">
-                  <label htmlFor="assigned_vehicle">Assigned Vehicle:</label>
-                  <select
-                    id="assigned_vehicle"
-                    value={updateData.assigned_vehicle}
-                    onChange={(e) => setUpdateData({ ...updateData, assigned_vehicle: e.target.value })}
-                    className="dispatch-form-select"
-                  >
-                    <option value="">Select Vehicle</option>
-                    {vehicles
-                      .filter((v) => v.status === 'Available')
-                      .map((vehicle) => (
-                        <option key={vehicle.id} value={vehicle.vehicle_id}>
-                          {vehicle.vehicle_id} - {vehicle.vehicle_type}
-                        </option>
-                      ))}
-                  </select>
-                </div>
+                
 
                 <div className="dispatch-form-group">
                   <label htmlFor="response_notes">Response Notes:</label>

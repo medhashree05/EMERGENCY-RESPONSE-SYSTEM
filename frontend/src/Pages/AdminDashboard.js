@@ -31,6 +31,11 @@ function AdminDashboard() {
   const [selectedServices, setSelectedServices] = useState([])
   const [requiredServiceTypes, setRequiredServiceTypes] = useState([])
   const [dispatchingMultiple, setDispatchingMultiple] = useState(false)
+  const [showMessagesModal, setShowMessagesModal] = useState(false)
+const [dispatchMessages, setDispatchMessages] = useState([])
+const [loadingMessages, setLoadingMessages] = useState(false)
+const [creatingRequest, setCreatingRequest] = useState(null)
+const [unreadCount, setUnreadCount] = useState(0)
   const [updateData, setUpdateData] = useState({
     status: '',
     resolution_notes: '',
@@ -97,7 +102,98 @@ function AdminDashboard() {
       setLoading(false)
     }
   }
+const loadDispatchMessages = async () => {
+  try {
+    setLoadingMessages(true)
+    const token = localStorage.getItem('adminToken') || localStorage.getItem('token')
+    
+    const response = await fetch('http://localhost:8000/admin/messages', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
 
+    if (!response.ok) throw new Error('Failed to fetch messages')
+    
+    const messages = await response.json()
+    setDispatchMessages(messages)
+    
+    // Count unread messages
+    const unread = messages.filter(msg => !msg.is_read).length
+    setUnreadCount(unread)
+    
+  } catch (error) {
+    console.error('Error loading messages:', error)
+  } finally {
+    setLoadingMessages(false)
+  }
+}
+
+// Add this function to mark messages as read
+const markMessageAsRead = async (messageId) => {
+  try {
+    const token = localStorage.getItem('adminToken') || localStorage.getItem('token')
+    
+    const response = await fetch(`http://localhost:8000/admin/messages/${messageId}/read`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+
+    if (response.ok) {
+      loadDispatchMessages() // Refresh messages
+    }
+  } catch (error) {
+    console.error('Error marking message as read:', error)
+  }
+}
+
+// Add this function to update emergency status after receiving dispatch message
+const handleEmergencyStatusUpdate = async (emergencyId, newStatus, resolutionNotes = '') => {
+  try {
+    const updatePayload = {
+      status: newStatus,
+    }
+
+    if (newStatus === 'resolved') {
+      updatePayload.resolved_time = new Date().toISOString()
+      updatePayload.resolved_by = `${adminData.first_name} ${adminData.last_name}`
+      if (resolutionNotes) {
+        updatePayload.resolution_notes = resolutionNotes
+      }
+    }
+
+    const { error } = await supabase
+      .from('emergencies')
+      .update(updatePayload)
+      .eq('id', emergencyId)
+
+    if (error) throw error
+
+    alert(`Emergency status updated to ${newStatus}`)
+    loadRecentEmergencies()
+    loadSystemStats()
+    
+  } catch (error) {
+    console.error('Error updating emergency status:', error)
+    alert('Failed to update emergency status')
+  }
+}
+
+// Add to useEffect to load messages
+useEffect(() => {
+  // ... existing code ...
+  loadDispatchMessages()
+
+  // Set up interval to check for new messages
+  const messageInterval = setInterval(loadDispatchMessages, 30000) // Check every 30 seconds
+
+  return () => {
+    // ... existing cleanup ...
+    clearInterval(messageInterval)
+  }
+}, [])
   const loadSystemStats = async () => {
     try {
       const { count: totalUsers, error: usersError } = await supabase
@@ -166,7 +262,7 @@ function AdminDashboard() {
         )
       `
         )
-        .in('status', ['Accepted', 'responding', 'pending', 'resolved'])
+        .in('status', ['Accepted', 'responding', 'pending', 'resolved','Dispatched'])
         .order('reported_time', { ascending: false })
         .limit(15) // Increased limit to show more resolved cases
 
@@ -483,390 +579,198 @@ function AdminDashboard() {
     }
   }
 
-  const handleDispatch = async () => {
-    if (!viewEmergency) {
-      alert('Emergency data not available')
-      return
-    }
+ 
 
-    console.log(
-      `Emergency Type: "${viewEmergency.type}" - Fetching dispatch units from database`
+
+const handleMultiDispatchRequest = async () => {
+  if (selectedServices.length === 0) {
+    alert('Please select at least one dispatch unit')
+    return
+  }
+
+  setDispatchingMultiple(true)
+
+  try {
+    const emergencyId = viewEmergency?.id || viewEmergency?.rawData?.id
+    if (!emergencyId) throw new Error('Emergency ID not found')
+
+    // Create multiple dispatch requests
+    const dispatchPromises = selectedServices.map(service => 
+      supabase.from('dispatch_requests').insert({
+        emergency_id: emergencyId,
+        dispatch_unit_id: service.id,
+        emergency_type: viewEmergency.type,
+        location: viewEmergency.location,
+        requester_name: viewEmergency.user_name,
+        requester_phone: viewEmergency.user_phone,
+        priority: viewEmergency.priority,
+        status: 'Requested',
+        requested_at: new Date().toISOString(),
+        description: `Emergency dispatch request for ${viewEmergency.type} at ${viewEmergency.location}`,
+      })
     )
 
-    setLoadingServices(true)
-    try {
-      // Get user's city from the emergency data
-      const userId = viewEmergency.rawData?.user_id
+    await Promise.all(dispatchPromises)
 
-      if (!userId) {
-        throw new Error('User ID not found in emergency data')
+    const unitNames = selectedServices.map(s => s.name).join(', ')
+    alert(`Dispatch requests sent to ${selectedServices.length} unit(s): ${unitNames}`)
+
+    // Close modals and refresh data
+    setShowDispatchModal(false)
+    setShowViewModal(false)
+    setSelectedServices([])
+    await Promise.all([loadRecentEmergencies(), loadSystemStats()])
+
+  } catch (error) {
+    console.error('Multi-dispatch request error:', error)
+    alert('Failed to send dispatch requests. Error: ' + error.message)
+  } finally {
+    setDispatchingMultiple(false)
+  }
+}
+// Updated loadAvailableEmergencies function to filter units with availability > 0
+const handleDispatch = async () => {
+  if (!viewEmergency) {
+    alert('Emergency data not available')
+    return
+  }
+
+  console.log(
+    `Emergency Type: "${viewEmergency.type}" - Fetching dispatch units from database`
+  )
+
+  setLoadingServices(true)
+  try {
+    // Get user's city from the emergency data
+    const userId = viewEmergency.rawData?.user_id
+
+    if (!userId) {
+      throw new Error('User ID not found in emergency data')
+    }
+
+    // Fetch user's city information
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('city')
+      .eq('id', userId)
+      .single()
+
+    if (userError) {
+      throw new Error('Failed to fetch user location: ' + userError.message)
+    }
+
+    if (!userData?.city) {
+      throw new Error('User city information not available')
+    }
+
+    const userCity = userData.city
+
+    console.log(`User city: ${userCity} - Fetching dispatch units`)
+
+    // Determine required service types based on emergency type
+    const getRequiredServiceTypes = (emergencyType) => {
+      const type = emergencyType.toLowerCase()
+      switch (type) {
+        case 'medical':
+        case 'heart attack':
+        case 'accident':
+          return ['ambulance', 'hospital']
+        case 'fire':
+          return ['fire_department']
+        case 'police':
+        case 'theft':
+        case 'assault':
+          return ['police']
+        case 'natural disaster':
+          return ['ambulance', 'fire_department', 'police']
+        default:
+          return ['ambulance', 'police'] // Default services
       }
+    }
 
-      // Fetch user's city information
-      const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('city')
-        .eq('id', userId)
-        .single()
+    const requiredTypes = getRequiredServiceTypes(viewEmergency.type)
 
-      if (userError) {
-        throw new Error('Failed to fetch user location: ' + userError.message)
-      }
+    // UPDATED: Fetch dispatch units with units_available > 0 instead of just checking boolean
+    const { data: dispatchUnits, error: dispatchError } = await supabase
+      .from('dispatch_units')
+      .select('*')
+      .eq('city', userCity)
+      .in('unit_type', requiredTypes)
+      .gt('units_available', 0) // Only units with available count > 0
+      .order('unit_type')
 
-      if (!userData?.city) {
-        throw new Error('User city information not available')
-      }
-
-      const userCity = userData.city
-
-      console.log(`User city: ${userCity} - Fetching dispatch units`)
-
-      // Determine required service types based on emergency type
-      const getRequiredServiceTypes = (emergencyType) => {
-        const type = emergencyType.toLowerCase()
-        switch (type) {
-          case 'medical':
-          case 'heart attack':
-          case 'accident':
-            return ['ambulance', 'hospital']
-          case 'fire':
-            return ['fire_department']
-          case 'police':
-          case 'theft':
-          case 'assault':
-            return ['police']
-          case 'natural disaster':
-            return ['ambulance', 'fire_department', 'police']
-          default:
-            return ['ambulance', 'police'] // Default services
-        }
-      }
-
-      const requiredTypes = getRequiredServiceTypes(viewEmergency.type)
-
-      // Fetch dispatch units from the same city
-      const { data: dispatchUnits, error: dispatchError } = await supabase
-        .from('dispatch_units')
-        .select('*')
-        .eq('city', userCity)
-        .in('unit_type', requiredTypes)
-        .gt('units_available', 0) // changed condition
-        .order('unit_type')
-
-      if (dispatchError) {
-        throw new Error(
-          'Failed to fetch dispatch units: ' + dispatchError.message
-        )
-      }
-
-      if (!dispatchUnits || dispatchUnits.length === 0) {
-        alert(
-          `No available dispatch units found in ${userCity} for this emergency type`
-        )
-        return
-      }
-
-      console.log(`Found ${dispatchUnits.length} dispatch units in ${userCity}`)
-
-      // Group units by type
-      const unitsByType = {}
-      dispatchUnits.forEach((unit) => {
-        if (!unitsByType[unit.unit_type]) {
-          unitsByType[unit.unit_type] = []
-        }
-        unitsByType[unit.unit_type].push({
-          id: unit.id,
-          name: unit.unit_name,
-          type: unit.unit_type,
-          station: unit.station_name,
-          contact: unit.contact_number,
-          isAvailable: unit.units_available,
-          city: unit.city,
-          address: unit.station_address || 'Address not available',
-          unitData: unit,
-        })
-      })
-
-      // Set services data for dispatch
-      setNearbyServices(
-        dispatchUnits.map((unit) => ({
-          id: unit.id,
-          name: unit.unit_name,
-          serviceType: unit.unit_type,
-          station: unit.station_name,
-          contact: unit.contact_number,
-          city: unit.city,
-          address: unit.station_address || 'Address not available',
-          isAvailable: unit.units_available,
-          unitData: unit,
-        }))
+    if (dispatchError) {
+      throw new Error(
+        'Failed to fetch dispatch units: ' + dispatchError.message
       )
-
-      setServicesByType(unitsByType)
-      setRequiredServiceTypes(requiredTypes)
-      setSelectedServices([]) // Reset selection
-      setShowDispatchModal(true)
-    } catch (error) {
-      console.error('Error fetching dispatch units:', error)
-      alert('Failed to load dispatch units. Error: ' + error.message)
-    } finally {
-      setLoadingServices(false)
     }
-  }
-  const handleServiceSelection = (service, isSelected) => {
-    setSelectedServices((prev) => {
-      if (isSelected) {
-        return [...prev, service]
-      } else {
-        return prev.filter((s) => s.id !== service.id)
-      }
-    })
-  }
 
-  // Replace the handleServiceDispatch function with this updated version
-  const handleServiceDispatch = async (service) => {
-    console.log('🔄 Starting dispatch unit deployment...')
-    console.log('📋 Unit details:', service)
-    console.log('🚨 Emergency details:', {
-      id: viewEmergency?.id,
-      rawData: viewEmergency?.rawData?.id,
-      status: viewEmergency?.status,
-    })
-
-    setDispatchingService(service.id)
-
-    try {
-      // Use the correct emergency ID
-      const emergencyId = viewEmergency?.id || viewEmergency?.rawData?.id
-
-      if (!emergencyId) {
-        throw new Error('Emergency ID not found')
-      }
-
-      console.log('🎯 Updating emergency ID:', emergencyId)
-
-      // Get the current emergency data including existing dispatch info
-      const { data: currentEmergency, error: fetchError } = await supabase
-        .from('emergencies')
-        .select('id, status, handled_by, dispatched_services, dispatch_history')
-        .eq('id', emergencyId)
-        .single()
-
-      if (fetchError) {
-        console.error('❌ Error fetching current emergency:', fetchError)
-        throw new Error(
-          'Failed to fetch emergency details: ' + fetchError.message
-        )
-      }
-
-      if (!currentEmergency) {
-        throw new Error('Emergency not found in database')
-      }
-
-      console.log('✅ Current emergency status:', currentEmergency.status)
-
-      // Prepare new dispatch entry
-      const newDispatchEntry = {
-        unit_name: service.name,
-        unit_id: service.id,
-        unit_type: service.serviceType || service.type,
-        station_name: service.station,
-        contact_number: service.contact,
-        city: service.city,
-        dispatched_at: new Date().toISOString(),
-        dispatched_by: `${adminData.first_name} ${adminData.last_name}`,
-        admin_id: adminData.id,
-      }
-
-      // Update dispatched_services array (add unit name if not already present)
-      const currentServices = currentEmergency.dispatched_services || []
-      const updatedServices = currentServices.includes(service.name)
-        ? currentServices
-        : [...currentServices, service.name]
-
-      // Update dispatch_history array (always add new entry)
-      const currentHistory = currentEmergency.dispatch_history || []
-      const updatedHistory = [...currentHistory, newDispatchEntry]
-
-      // Update the dispatch unit availability in dispatch_units table
-      const { error: unitUpdateError } = await supabase
-        .from('dispatch_units')
-        .update({
-          units_available: false,
-          current_emergency_id: emergencyId,
-          last_dispatch_time: new Date().toISOString(),
-        })
-        .eq('id', service.id)
-
-      if (unitUpdateError) {
-        console.warn('⚠️ Failed to update unit availability:', unitUpdateError)
-        // Don't fail the whole operation for this
-      }
-
-      // Prepare emergency update data
-      const updateData = {
-        status: 'responding',
-        dispatched_services: updatedServices,
-        dispatch_history: updatedHistory,
-      }
-
-      console.log('📦 Update payload:', updateData)
-
-      // Update emergency status
-      const { data: updatedData, error: updateError } = await supabase
-        .from('emergencies')
-        .update(updateData)
-        .eq('id', emergencyId)
-        .select()
-
-      console.log('📊 Update result - Data:', updatedData)
-      console.log('📊 Update result - Error:', updateError)
-
-      if (updateError) {
-        console.error('❌ Database update error:', updateError)
-        throw new Error(
-          'Failed to update emergency status: ' + updateError.message
-        )
-      }
-
-      if (!updatedData || updatedData.length === 0) {
-        console.warn('⚠️ No rows were updated')
-        throw new Error('Emergency update failed - no rows affected')
-      }
-
-      console.log('✅ Successfully updated emergency:', updatedData[0])
-
-      alert(`${service.name} dispatched successfully to the emergency`)
-
-      // Close modals and refresh data
-      setShowDispatchModal(false)
-      setShowViewModal(false)
-
-      // Refresh data
-      await Promise.all([loadRecentEmergencies(), loadSystemStats()])
-
-      console.log('✅ Dispatch completed successfully')
-    } catch (error) {
-      console.error('🔥 Unit dispatch error:', error)
-      console.error('🔥 Error details:', {
-        message: error.message,
-        stack: error.stack,
-        emergencyId: viewEmergency?.id,
-        unitName: service?.name,
-      })
-
-      alert('Failed to dispatch unit. Error: ' + error.message)
-    } finally {
-      setDispatchingService(null)
-    }
-  }
-
-  // Replace the handleMultiServiceDispatch function with this updated version
-  const handleMultiServiceDispatch = async () => {
-    if (selectedServices.length === 0) {
-      alert('Please select at least one dispatch unit')
+    if (!dispatchUnits || dispatchUnits.length === 0) {
+      alert(
+        `No available dispatch units found in ${userCity} for this emergency type`
+      )
       return
     }
 
-    setDispatchingMultiple(true)
+    console.log(`Found ${dispatchUnits.length} dispatch units in ${userCity}`)
 
-    try {
-      const emergencyId = viewEmergency?.id || viewEmergency?.rawData?.id
-
-      if (!emergencyId) {
-        throw new Error('Emergency ID not found')
+    // Group units by type
+    const unitsByType = {}
+    dispatchUnits.forEach((unit) => {
+      if (!unitsByType[unit.unit_type]) {
+        unitsByType[unit.unit_type] = []
       }
+      unitsByType[unit.unit_type].push({
+        id: unit.id,
+        name: unit.unit_name,
+        type: unit.unit_type,
+        station: unit.station_name,
+        contact: unit.contact_number,
+        isAvailable: unit.units_available, // Now shows the actual count
+        city: unit.city,
+        address: unit.station_address || 'Address not available',
+        unitData: unit,
+      })
+    })
 
-      // Get current emergency data
-      const { data: currentEmergency, error: fetchError } = await supabase
-        .from('emergencies')
-        .select('dispatched_services, dispatch_history')
-        .eq('id', emergencyId)
-        .single()
-
-      if (fetchError) {
-        throw new Error(
-          'Failed to fetch current emergency data: ' + fetchError.message
-        )
-      }
-
-      // Prepare unit names for dispatched_services array
-      const currentServices = currentEmergency.dispatched_services || []
-      const newServiceNames = selectedServices.map((s) => s.name)
-      const updatedServices = [
-        ...new Set([...currentServices, ...newServiceNames]),
-      ] // Remove duplicates
-
-      // Prepare dispatch history entries
-      const currentHistory = currentEmergency.dispatch_history || []
-      const newHistoryEntries = selectedServices.map((service) => ({
-        unit_name: service.name,
-        unit_id: service.id,
-        unit_type: service.serviceType || service.type,
-        station_name: service.station,
-        contact_number: service.contact,
-        city: service.city,
-        dispatched_at: new Date().toISOString(),
-        dispatched_by: `${adminData.first_name} ${adminData.last_name}`,
-        admin_id: adminData.id,
+    // Set services data for dispatch
+    setNearbyServices(
+      dispatchUnits.map((unit) => ({
+        id: unit.id,
+        name: unit.unit_name,
+        serviceType: unit.unit_type,
+        station: unit.station_name,
+        contact: unit.contact_number,
+        city: unit.city,
+        address: unit.station_address || 'Address not available',
+        isAvailable: unit.units_available, // Now shows the actual count
+        unitData: unit,
       }))
-      const updatedHistory = [...currentHistory, ...newHistoryEntries]
+    )
 
-      // Update all selected dispatch units availability
-      const unitUpdatePromises = selectedServices.map((service) =>
-        supabase
-          .from('dispatch_units')
-          .update({
-            units_available: false,
-            current_emergency_id: emergencyId,
-            last_dispatch_time: new Date().toISOString(),
-          })
-          .eq('id', service.id)
-      )
-
-      // Execute all unit updates
-      await Promise.allSettled(unitUpdatePromises)
-
-      // Update emergency in database
-      const { data: updatedData, error: updateError } = await supabase
-        .from('emergencies')
-        .update({
-          status: 'responding',
-          dispatched_services: updatedServices,
-          dispatch_history: updatedHistory,
-        })
-        .eq('id', emergencyId)
-        .select()
-
-      if (updateError) {
-        throw new Error('Failed to update emergency: ' + updateError.message)
-      }
-
-      if (!updatedData || updatedData.length === 0) {
-        throw new Error('Emergency update failed - no rows affected')
-      }
-
-      console.log('Multi-dispatch successful:', updatedData[0])
-
-      const unitNames = selectedServices.map((s) => s.name).join(', ')
-      alert(
-        `Successfully dispatched ${selectedServices.length} unit(s): ${unitNames}`
-      )
-
-      // Close modals and refresh data
-      setShowDispatchModal(false)
-      setShowViewModal(false)
-      setSelectedServices([])
-
-      // Refresh data
-      await Promise.all([loadRecentEmergencies(), loadSystemStats()])
-    } catch (error) {
-      console.error('Multi-dispatch error:', error)
-      alert('Failed to dispatch units. Error: ' + error.message)
-    } finally {
-      setDispatchingMultiple(false)
-    }
+    setServicesByType(unitsByType)
+    setRequiredServiceTypes(requiredTypes)
+    setSelectedServices([]) // Reset selection
+    setShowDispatchModal(true)
+      
+    
+  }  catch (error) {
+    console.error('Error fetching dispatch units:', error)
+    alert('Failed to load dispatch units. Error: ' + error.message)
+  } finally {
+    setLoadingServices(false)
   }
+
+}
+const handleServiceSelection = (service, isSelected) => {
+  setSelectedServices(prev => {
+    if (isSelected) {
+      return [...prev, service]
+    } else {
+      return prev.filter(s => s.id !== service.id)
+    }
+  })
+}
 
   // Helper function to get unit type display name
   const getUnitTypeDisplayName = (unitType) => {
@@ -959,7 +863,47 @@ function AdminDashboard() {
       return 'Unable to decrypt medical information'
     }
   }
+const handleCreateDispatchRequest = async (service) => {
+  console.log('Creating dispatch request for unit:', service.name)
+  setCreatingRequest(service.id)
 
+  try {
+    const emergencyId = viewEmergency?.id || viewEmergency?.rawData?.id
+    if (!emergencyId) throw new Error('Emergency ID not found')
+
+    const dispatchRequestData = {
+      emergency_id: emergencyId,
+      dispatch_unit_id: service.id,
+      emergency_type: viewEmergency.type,
+      location: viewEmergency.location,
+      requester_name: viewEmergency.user_name,
+      requester_phone: viewEmergency.user_phone,
+      priority: viewEmergency.priority,
+      status: 'Pending',
+      requested_at: new Date().toISOString(),
+      description: `Emergency dispatch request for ${viewEmergency.type} at ${viewEmergency.location}`,
+    }
+
+    const { error: dispatchRequestError } = await supabase
+      .from('dispatch_requests')
+      .insert(dispatchRequestData)
+
+    if (dispatchRequestError) {
+      throw new Error('Failed to create dispatch request: ' + dispatchRequestError.message)
+    }
+
+    alert(`Dispatch request sent to ${service.name} successfully!`)
+    setShowDispatchModal(false)
+    setShowViewModal(false)
+    await Promise.all([loadRecentEmergencies(), loadSystemStats()])
+
+  } catch (error) {
+    console.error('Error creating dispatch request:', error)
+    alert('Failed to send dispatch request. Error: ' + error.message)
+  } finally {
+    setCreatingRequest(null)
+  }
+}
   const handleUpdateEmergency = async () => {
     if (!selectedEmergency || !adminData?.id) {
       alert('Unable to update emergency. Please try again.')
@@ -980,6 +924,24 @@ function AdminDashboard() {
         updatePayload.resolution_notes = updateData.resolution_notes
         updatePayload.resolved_by = `${adminData.first_name} ${adminData.last_name}`
       }
+       if (updateData.status === 'resolved') {
+      updatePayload.resolved_time = new Date().toISOString()
+      updatePayload.resolution_notes = updateData.resolution_notes
+      updatePayload.resolved_by = `${adminData.first_name} ${adminData.last_name}`
+      
+      // FREE UP THE ASSIGNED VEHICLE
+      if (selectedEmergency.rawData?.assigned_vehicle) {
+        const { error: vehicleError } = await supabase
+          .from('dispatch_vehicles')
+          .update({ status: 'Available' })
+          .eq('vehicle_id', selectedEmergency.rawData.assigned_vehicle)
+        
+        if (vehicleError) {
+          console.error('Failed to release vehicle:', vehicleError)
+          // Don't fail the whole operation, just log the error
+        }
+      }
+    }
 
       // If status is changing from 'Reported' to something else and not handled yet
       if (
@@ -1154,22 +1116,30 @@ function AdminDashboard() {
       </header>
       {/* Navigation */}
       <nav className="admin-admin-navigation">
-        <div className="admin-admin-container">
-          <div className="admin-nav-links">
-            <button className="admin-nav-link admin-active">Dashboard</button>
-            <button className="admin-nav-link" onClick={handleProfile}>
-              Profile
-            </button>
-
-            <button
-              className="admin-nav-link admin-logout-btn"
-              onClick={handleLogout}
-            >
-              Logout
-            </button>
-          </div>
-        </div>
-      </nav>
+  <div className="admin-admin-container">
+    <div className="admin-nav-links">
+      <button className="admin-nav-link admin-active">Dashboard</button>
+      <button className="admin-nav-link" onClick={handleProfile}>
+        Profile
+      </button>
+      <button 
+        className="admin-nav-link admin-messages-link" 
+        onClick={() => {
+          setShowMessagesModal(true)
+          loadDispatchMessages()
+        }}
+      >
+        Messages {unreadCount > 0 && <span className="admin-unread-badge">{unreadCount}</span>}
+      </button>
+      <button
+        className="admin-nav-link admin-logout-btn"
+        onClick={handleLogout}
+      >
+        Logout
+      </button>
+    </div>
+  </div>
+</nav>
       {/* Main Content */}
       <main className="admin-admin-main">
         <div className="admin-admin-container">
@@ -1517,7 +1487,134 @@ function AdminDashboard() {
                 <p>All emergency reports will appear here</p>
               </div>
             )}
-          </section>
+          </section> 
+          {showMessagesModal && (
+  <div className="admin-modal-overlay">
+    <div className="admin-modal admin-messages-modal">
+      <div className="admin-modal-header">
+        <h3>Dispatch Messages</h3>
+        <button
+          className="admin-modal-close"
+          onClick={() => setShowMessagesModal(false)}
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="admin-modal-content">
+        {loadingMessages ? (
+          <div className="admin-loading-messages">
+            <div className="admin-loading-spinner"></div>
+            <p>Loading messages...</p>
+          </div>
+        ) : dispatchMessages.length === 0 ? (
+          <div className="admin-no-messages">
+            <span className="admin-no-data-icon">📬</span>
+            <h4>No Messages</h4>
+            <p>No messages from dispatch units yet</p>
+          </div>
+        ) : (
+          <div className="admin-messages-list">
+            {dispatchMessages.map((message) => (
+              <div 
+                key={message.id} 
+                className={`admin-message-item ${!message.is_read ? 'admin-unread' : ''}`}
+              >
+                <div className="admin-message-header">
+                  <div className="admin-message-info">
+                    <span className="admin-message-from">
+                      From: {message.sent_by} ({message.dispatch_units?.unit_name})
+                    </span>
+                    <span className="admin-message-time">
+                      {new Date(message.sent_at).toLocaleString()}
+                    </span>
+                  </div>
+                  {!message.is_read && (
+                    <button
+                      className="admin-mark-read-btn"
+                      onClick={() => markMessageAsRead(message.id)}
+                    >
+                      Mark Read
+                    </button>
+                  )}
+                </div>
+                
+                <div className="admin-message-emergency">
+                  <h5>Emergency #{message.emergency_id}</h5>
+                  <p>Type: {message.emergencies?.type} | Location: {message.emergencies?.location}</p>
+                </div>
+
+                <div className="admin-message-content">
+                  <p>{message.message}</p>
+                </div>
+
+                <div className="admin-message-actions">
+                  <button
+                    className="admin-message-action-btn admin-view-emergency"
+                    onClick={() => {
+                      // Find and view the emergency
+                      const emergency = recentEmergencies.find(e => e.id === message.emergency_id)
+                      if (emergency) {
+                        handleEmergencyAction(emergency.id, 'view')
+                      }
+                    }}
+                  >
+                    View Emergency
+                  </button>
+                  
+
+                  
+<button
+  className="admin-message-action-btn admin-resolve-emergency"
+  onClick={() => {
+    const emergency = recentEmergencies.find(
+      (e) => e.id === message.emergency_id
+    );
+    if (!emergency) {
+      alert('Emergency not found. Please refresh the page.');
+      return;
+    }
+
+    // Pre-fill the modal
+    setSelectedEmergency(emergency);
+    setUpdateData({
+      status: 'resolved', // pre-select resolved
+      resolution_notes: `Emergency resolved based on dispatch message from ${message.sent_by}: ${message.message}`,
+      priority: emergency.priority,
+    });
+
+    // Show the same Update Emergency Modal
+    setShowUpdateModal(true);
+  }}
+>
+  Resolve Emergency
+</button>
+
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="admin-modal-actions">
+        <button
+          className="admin-modal-btn admin-cancel-btn"
+          onClick={() => setShowMessagesModal(false)}
+        >
+          Close
+        </button>
+        <button
+          className="admin-modal-btn admin-refresh-btn"
+          onClick={loadDispatchMessages}
+          disabled={loadingMessages}
+        >
+          {loadingMessages ? 'Loading...' : 'Refresh Messages'}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
         </div>
       </main>
       {/* Update Emergency Modal */}
@@ -1796,18 +1893,17 @@ function AdminDashboard() {
               >
                 Close
               </button>
-              {viewEmergency.status !== 'resolved' &&
-                viewEmergency.status !== 'responding' && (
-                  <button
-                    className="admin-modal-btn admin-dispatch-btn"
-                    onClick={handleDispatch}
-                    disabled={loadingServices}
-                  >
-                    {loadingServices
-                      ? 'Loading Services...'
-                      : 'Dispatch Services'}
-                  </button>
-                )}
+              {viewEmergency.status !== 'resolved' && viewEmergency.status != 'Dispatched'&& (  // Remove the responding check
+  <button
+    className="admin-modal-btn admin-dispatch-btn"
+    onClick={handleDispatch}
+    disabled={loadingServices}
+  >
+    {loadingServices
+      ? 'Loading Services...'
+      : 'Send Dispatch Requests'}  
+  </button>
+)}
             </div>
           </div>
         </div>
@@ -1926,20 +2022,20 @@ function AdminDashboard() {
                           </div>
 
                           <div className="admin-service-quick-dispatch">
-                            <button
-                              className="admin-quick-dispatch-btn"
-                              onClick={() => handleServiceDispatch(unit)}
-                              disabled={
-                                dispatchingService === unit.id ||
-                                !unit.isAvailable
-                              }
-                              title="Dispatch this unit only"
-                            >
-                              {dispatchingService === unit.id
-                                ? 'Dispatching...'
-                                : 'Dispatch Only'}
-                            </button>
-                          </div>
+  <button
+    className="admin-quick-dispatch-btn"
+    onClick={() => handleCreateDispatchRequest(unit)}
+    disabled={
+      creatingRequest === unit.id ||
+      !unit.isAvailable
+    }
+    title="Send request to this dispatch unit"
+  >
+    {creatingRequest === unit.id
+      ? 'Sending Request...'
+      : 'Send Request'}
+  </button>
+</div>
                         </div>
                       ))}
                     </div>
@@ -1968,7 +2064,7 @@ function AdminDashboard() {
               {selectedServices.length > 0 && (
                 <button
                   className="admin-modal-btn admin-dispatch-selected-btn"
-                  onClick={handleMultiServiceDispatch}
+                  onClick={handleMultiDispatchRequest}
                   disabled={dispatchingMultiple}
                 >
                   {dispatchingMultiple

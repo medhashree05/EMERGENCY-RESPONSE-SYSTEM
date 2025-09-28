@@ -25,31 +25,61 @@ export default function Dashboard() {
   }, [navigate])
 
   // ✅ Fetch emergencies from Supabase
-  useEffect(() => {
-    const fetchEmergencies = async () => {
-      if (!loggedInUser?.id) return
+ useEffect(() => {
+  const fetchEmergencies = async () => {
+    if (!loggedInUser?.id) return
 
-      try {
-        setLoading(true)
-        const { data, error } = await supabase
-          .from('emergencies')
-          .select('*')
-          .eq('user_id', loggedInUser.id)
-          .order('reported_time', { ascending: false })
+    try {
+      setLoading(true)
+      const { data, error } = await supabase
+        .from('emergencies')
+        .select(`
+          *,
+          dispatch_units!emergencies_dispatch_unit_id_fkey (
+  unit_type,
+  department_name,
+  contact_number
+)
 
-        if (error) throw error
+        `)
+        .eq('user_id', loggedInUser.id)
+        .order('reported_time', { ascending: false })
 
-        setEmergencies(data || [])
-      } catch (err) {
-        console.error('Error fetching emergencies:', err)
-        setError('Failed to load emergency data')
-      } finally {
-        setLoading(false)
-      }
+      if (error) throw error
+
+      setEmergencies(data || [])
+    } catch (err) {
+      console.error('Error fetching emergencies:', err)
+      setError('Failed to load emergency data')
+    } finally {
+      setLoading(false)
     }
+  }
 
-    fetchEmergencies()
-  }, [loggedInUser])
+  fetchEmergencies()
+
+  // Set up real-time subscription for emergency updates
+  const emergencySubscription = supabase
+    .channel('emergency_updates')
+    .on(
+      'postgres_changes',
+      { 
+        event: 'UPDATE', 
+        schema: 'public', 
+        table: 'emergencies',
+        filter: `user_id=eq.${loggedInUser?.id}`
+      },
+      (payload) => {
+        console.log('Emergency updated:', payload)
+        fetchEmergencies() // Refresh emergency data
+      }
+    )
+    .subscribe()
+
+  return () => {
+    emergencySubscription.unsubscribe()
+  }
+}, [loggedInUser])
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000)
@@ -62,9 +92,9 @@ export default function Dashboard() {
   const handleLocation = () => navigate('/location')
 
   // Filter active emergencies (those not resolved or closed)
-  const activeEmergencies = emergencies.filter(emergency => 
-    emergency.status !== 'Resolved' && emergency.status !== 'Closed'
-  )
+ const activeEmergencies = emergencies.filter(emergency => 
+  emergency.status !== 'Resolved' && emergency.status !== 'resolved'
+)
 
   // Helper function to format time
   const formatTime = (timestamp) => {
@@ -250,19 +280,29 @@ export default function Dashboard() {
                         {emergency.status}
                       </span>
                     </div>
-                    <div className="emergency-details">
-                      <p>📍 Location: {emergency.location}</p>
-                      <p>⏰ Reported: {formatTime(emergency.reported_time)}</p>
-                      <p>
-                        ⚠️ Priority:{' '}
-                        <span className={`priority-badge ${getPriorityColor(emergency.priority)}`}>
-                          {emergency.priority}
-                        </span>
-                      </p>
-                      <p>🚑 Dispatch: {emergency.dispatched_services || 'Not assigned'}</p>
-                      <p>⏳ ETA: {formatETA(emergency.eta)}</p>
-                      <p>✅ Arrival: {getArrivalStatus(emergency.status, emergency.resolved_time)}</p>
-                    </div>
+                   <div className="emergency-details">
+  <p>📍 Location: {emergency.location}</p>
+  <p>⏰ Reported: {formatTime(emergency.reported_time)}</p>
+  <p>
+    ⚠️ Priority:{' '}
+    <span className={`priority-badge ${getPriorityColor(emergency.priority)}`}>
+      {emergency.priority}
+    </span>
+  </p>
+  {emergency.assigned_vehicle && (
+    <p>🚑 Assigned Vehicle: {emergency.assigned_vehicle}</p>
+  )}
+  {emergency.dispatch_units && (
+    <p>🏢 Dispatch Unit: {emergency.dispatch_units.unit_name}</p>
+  )}
+  {emergency.dispatch_units?.contact_number && (
+    <p>📞 Unit Contact: {emergency.dispatch_units.contact_number}</p>
+  )}
+  <p>✅ Status: {getArrivalStatus(emergency.status, emergency.resolved_time)}</p>
+  {emergency.estimated_arrival && (
+    <p>⏳ Estimated Arrival: {new Date(emergency.estimated_arrival).toLocaleString()}</p>
+  )}
+</div>
                     <div className="emergency-actions">
                       <button className="emergency-btn">Track Unit</button>
                       <button className="emergency-btn secondary">
