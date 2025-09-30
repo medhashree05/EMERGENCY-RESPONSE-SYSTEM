@@ -2,55 +2,75 @@ import React, { useRef, useState } from 'react'
 
 export default function VoiceRecorder({ onSendAudio }) {
   const mediaRecorderRef = useRef(null)
+  const audioChunksRef = useRef([]) // ✅ Use ref instead of state
   const [isRecording, setIsRecording] = useState(false)
-  const [audioChunks, setAudioChunks] = useState([])
+  const streamRef = useRef(null) // ✅ Store stream to clean up properly
 
   const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          sampleRate: 16000 // Optimal for Whisper
+        }
+      })
+      
+      streamRef.current = stream
+      audioChunksRef.current = [] // ✅ Clear previous chunks
 
-      // ✅ Specify supported formats explicitly
+      // Determine best MIME type
       const options = {
         mimeType: 'audio/webm;codecs=opus',
       }
 
-      // Fallback to other formats if webm isn't supported
       if (!MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-        if (MediaRecorder.isTypeSupported('audio/mp4')) {
+        if (MediaRecorder.isTypeSupported('audio/webm')) {
+          options.mimeType = 'audio/webm'
+        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
           options.mimeType = 'audio/mp4'
-        } else if (MediaRecorder.isTypeSupported('audio/wav')) {
-          options.mimeType = 'audio/wav'
+        } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
+          options.mimeType = 'audio/ogg'
         }
       }
 
+      console.log('🎤 Using MIME type:', options.mimeType)
+
       mediaRecorderRef.current = new MediaRecorder(stream, options)
-      setAudioChunks([])
 
       mediaRecorderRef.current.ondataavailable = (event) => {
         if (event.data.size > 0) {
-          setAudioChunks((prev) => [...prev, event.data])
+          console.log(`📦 Chunk: ${(event.data.size / 1024).toFixed(2)} KB`)
+          audioChunksRef.current.push(event.data) // ✅ Push to ref, not state
         }
       }
 
       mediaRecorderRef.current.onstop = async () => {
-        // ✅ Create blob with the same MIME type used for recording
-        const mimeType = mediaRecorderRef.current.mimeType
-        const audioBlob = new Blob(audioChunks, { type: mimeType })
-
-        // ✅ Determine file extension based on MIME type
-        let fileExtension = 'webm'
-        let fileName = 'voice.webm'
-
-        if (mimeType.includes('mp4')) {
-          fileExtension = 'mp4'
-          fileName = 'voice.mp4'
-        } else if (mimeType.includes('wav')) {
-          fileExtension = 'wav'
-          fileName = 'voice.wav'
-        } else if (mimeType.includes('ogg')) {
-          fileExtension = 'ogg'
-          fileName = 'voice.ogg'
+        console.log(`⏹️ Recording stopped. Chunks: ${audioChunksRef.current.length}`)
+        
+        // ✅ Now audioChunksRef has the correct data
+        if (audioChunksRef.current.length === 0) {
+          onSendAudio('⚠️ No audio recorded. Please try again.')
+          cleanup()
+          return
         }
+
+        const mimeType = mediaRecorderRef.current.mimeType
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType })
+        
+        console.log(`🎵 Blob created: ${(audioBlob.size / 1024).toFixed(2)} KB`)
+
+        if (audioBlob.size < 1000) {
+          onSendAudio('⚠️ Recording too short. Please speak for longer.')
+          cleanup()
+          return
+        }
+
+        // Determine file extension
+        let fileName = 'voice.webm'
+        if (mimeType.includes('mp4')) fileName = 'voice.mp4'
+        else if (mimeType.includes('wav')) fileName = 'voice.wav'
+        else if (mimeType.includes('ogg')) fileName = 'voice.ogg'
 
         const audioFile = new File([audioBlob], fileName, { type: mimeType })
 
@@ -58,9 +78,7 @@ export default function VoiceRecorder({ onSendAudio }) {
           const formData = new FormData()
           formData.append('file', audioFile)
 
-          console.log(
-            `Sending audio file: ${fileName} (${mimeType}), size: ${audioFile.size} bytes`
-          )
+          console.log(`📤 Sending: ${fileName}, ${(audioFile.size / 1024).toFixed(2)} KB`)
 
           const res = await fetch('http://localhost:8000/transcribe', {
             method: 'POST',
@@ -68,41 +86,68 @@ export default function VoiceRecorder({ onSendAudio }) {
           })
 
           if (!res.ok) {
-            const errorText = await res.text()
-            throw new Error(`HTTP ${res.status}: ${errorText}`)
+            const errorData = await res.json().catch(() => ({ error: 'Unknown error' }))
+            throw new Error(errorData.error || `HTTP ${res.status}`)
           }
 
           const data = await res.json()
+          console.log('✅ Response:', data)
 
-          if (data.text && data.text.trim()) {
+          if (data.success && data.text && data.text.trim()) {
             onSendAudio(data.text.trim())
-          } else {
+          } else if (data.success) {
             onSendAudio('⚠️ No speech detected in audio.')
+          } else {
+            throw new Error(data.error || 'Transcription failed')
           }
         } catch (err) {
-          console.error('Transcription error:', err)
-          onSendAudio('⚠️ Transcription failed. Please try again.')
+          console.error('❌ Transcription error:', err)
+          onSendAudio(`⚠️ Transcription failed: ${err.message}`)
+        } finally {
+          cleanup()
         }
-
-        // ✅ Clean up - stop all tracks
-        stream.getTracks().forEach((track) => track.stop())
       }
 
-      mediaRecorderRef.current.start()
+      mediaRecorderRef.current.onerror = (error) => {
+        console.error('❌ MediaRecorder error:', error)
+        onSendAudio('⚠️ Recording error occurred.')
+        cleanup()
+      }
+
+      // ✅ Start with timeslice to get chunks during recording
+      mediaRecorderRef.current.start(1000) // Chunk every 1 second
       setIsRecording(true)
+      console.log('🔴 Recording started')
+
     } catch (err) {
-      console.error('Mic access denied:', err)
-      onSendAudio(
-        '⚠️ Microphone access denied. Please check your browser permissions.'
-      )
+      console.error('❌ Mic access error:', err)
+      let message = '⚠️ Microphone access denied.'
+      
+      if (err.name === 'NotAllowedError') {
+        message = '⚠️ Please allow microphone access in browser settings.'
+      } else if (err.name === 'NotFoundError') {
+        message = '⚠️ No microphone found. Please connect one.'
+      }
+      
+      onSendAudio(message)
+      cleanup()
     }
   }
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
+    console.log('⏸️ Stopping recording...')
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop()
       setIsRecording(false)
     }
+  }
+
+  const cleanup = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop())
+      streamRef.current = null
+    }
+    audioChunksRef.current = []
   }
 
   return (

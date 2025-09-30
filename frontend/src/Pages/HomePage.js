@@ -7,7 +7,7 @@ function HomePage() {
   const [user, setUser] = useState(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [buttonDisabled, setButtonDisabled] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [processingButton, setProcessingButton] = useState(null);
 
   const dropdownRef = useRef(null);
   const navigate = useNavigate();
@@ -20,12 +20,13 @@ function HomePage() {
     }
   }, []);
 
-  const handleEmergencyClick = async () => {
+
+const handleEmergencyClick = async () => {
+  setProcessingButton("panic");  // 👈 mark this button as loading
   setEmergencyActive(true);
-    setButtonDisabled(true); // Disable button
-  setLoading(true);   
+  setButtonDisabled(true);
   try {
-    const token = localStorage.getItem("token");
+     const token = localStorage.getItem("token");
     if (token) {
       // Get current location first
       const getCurrentLocation = () => {
@@ -87,7 +88,8 @@ function HomePage() {
         console.error("Failed to get current location:", locationError);
         // Continue with emergency call even if location fails
       }
-
+      locationData = await getCurrentLocation();
+        console.log("Current location obtained:", locationData);
       // Create emergency entry in database
       try {
         const emergencyResponse = await fetch("http://localhost:8000/emergency/create", {
@@ -99,7 +101,9 @@ function HomePage() {
           body: JSON.stringify({
             type: "General Emergency", // You can customize this or make it dynamic
             location: locationString,
-            priority: "Critical"
+            priority: "Critical",
+            latitude:locationData.latitude,
+            longitude:locationData.longitude
           }),
         });
 
@@ -125,10 +129,9 @@ function HomePage() {
   } catch (err) {
     console.error("Emergency call failed:", err);
   }
-  // ✅ After completion
-  setLoading(false);
-  alert("🚨 Emergency service alerted!"); // Popup message
-setTimeout(() => {
+  setProcessingButton(null);  // 👈 reset when done
+  alert("🚨 Emergency service alerted!");
+  setTimeout(() => {
   
     setEmergencyActive(false);
   }, 1000);
@@ -137,13 +140,11 @@ setTimeout(() => {
     setButtonDisabled(false);
     setEmergencyActive(false);
   }, 5000);
-  
 };
-
 const handleServiceEmergency = async (emergencyType) => {
   setEmergencyActive(true);
   setButtonDisabled(true); // Disable button
-  setLoading(true);   
+  setProcessingButton(emergencyType); 
   try {
     const token = localStorage.getItem("token");
     if (token) {
@@ -310,8 +311,7 @@ const handleServiceEmergency = async (emergencyType) => {
   } catch (err) {
     console.error(`${emergencyType} emergency call failed:`, err);
   }
-  // ✅ After completion
-  setLoading(false);
+  setProcessingButton(null); 
   alert("🚨 Emergency service alerted!"); // Popup message
 
   // Re-enable button after 5 seconds
@@ -476,12 +476,14 @@ const handleAccidentEmergency = () => {
             <h2>Emergency Panic Button</h2>
             <p className="section-subtitle">Press and hold for immediate emergency assistance</p>
             
-            <button
+          <button
   onClick={handleEmergencyClick}
   className={`panic-button ${emergencyActive ? 'active' : ''}`}
-  disabled={buttonDisabled} // Disable while processing
+  disabled={buttonDisabled}
 >
-  {loading ? "⏳ Processing..." : (emergencyActive ? "EMERGENCY ACTIVATED" : "EMERGENCY")}
+  {processingButton === "panic"
+    ? "⏳ Processing..."
+    : (emergencyActive ? "EMERGENCY ACTIVATED" : "EMERGENCY")}
 </button>
             
             <p className="panic-button-info">
@@ -503,13 +505,16 @@ const handleAccidentEmergency = () => {
       <div className="service-icon police-icon">🛡️</div>
       <h4>Police</h4>
       <p>Criminal activity, theft, violence, suspicious behavior</p>
-      <button
+     <button
   className="service-btn police-btn"
   onClick={handlePoliceEmergency}
   disabled={buttonDisabled}
 >
-  {loading ? "⏳ Processing..." : "Need Police Assistance"}
+  {processingButton === "Police Emergency"
+    ? "⏳ Processing..."
+    : "Need Police Assistance"}
 </button>
+
     </div>
 
     {/* Medical */}
@@ -517,9 +522,16 @@ const handleAccidentEmergency = () => {
       <div className="service-icon medical-icon">❤️</div>
       <h4>Medical</h4>
       <p>Injuries, illness, cardiac events, breathing problems</p>
-      <button className="service-btn medical-btn" onClick={handleMedicalEmergency}disabled={buttonDisabled}>
-       {loading ? "⏳ Processing..." : "Need Medical Assistance"}
-      </button>
+     <button
+  className="service-btn medical-btn"
+  onClick={handleMedicalEmergency}
+  disabled={buttonDisabled}
+>
+  {processingButton === "Medical Emergency"
+    ? "⏳ Processing..."
+    : "Need Medical Assistance"}
+</button>
+
     </div>
 
     {/* Fire */}
@@ -527,9 +539,16 @@ const handleAccidentEmergency = () => {
       <div className="service-icon fire-icon">🔥</div>
       <h4>Fire</h4>
       <p>Fire, smoke, gas leaks, hazardous materials</p>
-      <button className="service-btn fire-btn" onClick={handleFireEmergency}disabled={buttonDisabled}>
-       {loading ? "⏳ Processing..." : "Need Fire Assistance"}
-      </button>
+      <button
+  className="service-btn fire-btn"
+  onClick={handleFireEmergency}
+  disabled={buttonDisabled}
+>
+  {processingButton === "Fire Emergency"
+    ? "⏳ Processing..."
+    : "Need Fire Assistance"}
+</button>
+
     </div>
 
     {/* Accident */}
@@ -537,9 +556,16 @@ const handleAccidentEmergency = () => {
       <div className="service-icon accident-icon">🚗</div>
       <h4>Accident</h4>
       <p>Vehicle accidents, collisions, traffic incidents</p>
-      <button className="service-btn accident-btn" onClick={handleAccidentEmergency}disabled={buttonDisabled}>
-       {loading ? "⏳ Processing..." : "Call Accident"}
-      </button>
+ <button
+  className="service-btn accident-btn"
+  onClick={handleAccidentEmergency}
+  disabled={buttonDisabled}
+>
+  {processingButton === "Accident Emergency"
+    ? "⏳ Processing..."
+    : "Call Accident"}
+</button>
+
     </div>
   </div>
 </section>

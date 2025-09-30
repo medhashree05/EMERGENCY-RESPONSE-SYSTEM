@@ -20,47 +20,261 @@ app.use(express.json())
 
 const PORT = process.env.PORT || 8000
 
-// Replace the simple upload configuration
+// Enhanced multer configuration with better error handling
 const upload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => {
       const uploadsDir = path.join(__dirname, 'uploads')
-      // Create directory if it doesn't exist
-      if (!fs.existsSync(uploadsDir)) {
-        fs.mkdirSync(uploadsDir, { recursive: true })
+      try {
+        if (!fs.existsSync(uploadsDir)) {
+          fs.mkdirSync(uploadsDir, { recursive: true })
+        }
+        cb(null, uploadsDir)
+      } catch (err) {
+        console.error('Failed to create upload directory:', err)
+        cb(new Error('Server upload directory error'), false)
       }
-      cb(null, uploadsDir)
     },
     filename: (req, file, cb) => {
-      // Generate unique filename with proper extension
       const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9)
       const ext = path.extname(file.originalname) || '.webm'
       cb(null, `audio-${uniqueSuffix}${ext}`)
     },
   }),
   limits: {
-    fileSize: 25 * 1024 * 1024, // 25MB limit
+    fileSize: 25 * 1024 * 1024, // 25MB
+    files: 1,
   },
   fileFilter: (req, file, cb) => {
     const allowedMimes = [
       'audio/webm',
+      'audio/webm;codecs=opus',
       'audio/wav',
+      'audio/wave',
+      'audio/x-wav',
       'audio/mp3',
-      'audio/mp4',
       'audio/mpeg',
+      'audio/mp4',
       'audio/ogg',
       'audio/opus',
     ]
 
+    console.log('Received file mimetype:', file.mimetype)
+
     if (allowedMimes.includes(file.mimetype)) {
       cb(null, true)
     } else {
-      cb(new Error(`Unsupported audio format: ${file.mimetype}`), false)
+      cb(
+        new Error(
+          `Unsupported format: ${file.mimetype}. Please record in a supported format.`
+        ),
+        false
+      )
     }
   },
 })
 
-// --------------------
+// Optimized transcription endpoint with retry logic
+app.post('/transcribe', upload.single('file'), async (req, res) => {
+  let filePath = null
+  const startTime = Date.now()
+
+  try {
+    // Validate file upload
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'No audio file received. Please try recording again.',
+      })
+    }
+
+    filePath = req.file.path
+    console.log(`\n📁 [TRANSCRIBE] New request:`)
+    console.log(`   File: ${req.file.filename}`)
+    console.log(`   Size: ${(req.file.size / 1024).toFixed(2)} KB`)
+    console.log(`   Type: ${req.file.mimetype}`)
+
+    // Verify file exists and isn't empty
+    if (!fs.existsSync(filePath)) {
+      throw new Error('File not found after upload')
+    }
+
+    const stats = fs.statSync(filePath)
+    if (stats.size === 0) {
+      throw new Error('Uploaded file is empty')
+    }
+
+    if (stats.size < 1000) {
+      // Less than 1KB is suspicious
+      throw new Error('Audio file too small, may be corrupted')
+    }
+
+    // Transcription with timeout and retry
+    let transcription
+    let lastError
+    const maxRetries = 2
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`   Attempt ${attempt}/${maxRetries}...`)
+
+        const transcriptionPromise = groq.audio.transcriptions.create({
+          file: fs.createReadStream(filePath),
+          model: 'whisper-large-v3',
+          language: 'en',
+          response_format: 'json',
+          temperature: 0.0,
+        })
+
+        // 45 second timeout per attempt
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error('Transcription timeout')),
+            45000
+          )
+        )
+
+        transcription = await Promise.race([
+          transcriptionPromise,
+          timeoutPromise,
+        ])
+
+        // Success - break retry loop
+        break
+      } catch (err) {
+        lastError = err
+        console.error(`   Attempt ${attempt} failed:`, err.message)
+
+        if (attempt < maxRetries) {
+          // Wait before retry (exponential backoff)
+          await new Promise((resolve) =>
+            setTimeout(resolve, 1000 * attempt)
+          )
+        }
+      }
+    }
+
+    // If all retries failed
+    if (!transcription) {
+      throw lastError || new Error('Transcription failed after retries')
+    }
+
+    // Clean up file after successful transcription
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath)
+    }
+
+    const processingTime = Date.now() - startTime
+    const transcribedText = transcription.text?.trim() || ''
+
+    console.log(`✅ [TRANSCRIBE] Success in ${processingTime}ms`)
+    console.log(`   Text length: ${transcribedText.length} chars`)
+    console.log(`   Preview: "${transcribedText.substring(0, 100)}..."`)
+
+    // Return empty text as valid response if no speech detected
+    if (!transcribedText) {
+      return res.json({
+        success: true,
+        text: '',
+        message: 'No speech detected in audio',
+        processingTime: `${processingTime}ms`,
+      })
+    }
+
+    res.json({
+      success: true,
+      text: transcribedText,
+      processingTime: `${processingTime}ms`,
+      audioSize: `${(req.file.size / 1024).toFixed(2)} KB`,
+    })
+  } catch (err) {
+    console.error('❌ [TRANSCRIBE] Error:', err.message)
+
+    // Always clean up file on error
+    if (filePath && fs.existsSync(filePath)) {
+      try {
+        fs.unlinkSync(filePath)
+        console.log('   Cleaned up file after error')
+      } catch (cleanupErr) {
+        console.error('   Cleanup failed:', cleanupErr.message)
+      }
+    }
+
+    // Detailed error responses
+    let errorMessage = 'Failed to transcribe audio'
+    let statusCode = 500
+
+    if (err.message.includes('timeout')) {
+      errorMessage =
+        'Transcription took too long. Please try a shorter recording.'
+      statusCode = 408
+    } else if (
+      err.message.includes('format') ||
+      err.message.includes('mimetype')
+    ) {
+      errorMessage =
+        'Audio format not supported. Please check your microphone settings.'
+      statusCode = 400
+    } else if (err.message.includes('too large')) {
+      errorMessage = 'Audio file too large. Please record shorter messages.'
+      statusCode = 413
+    } else if (err.message.includes('rate limit')) {
+      errorMessage = 'Too many requests. Please wait and try again.'
+      statusCode = 429
+    } else if (
+      err.message.includes('empty') ||
+      err.message.includes('too small')
+    ) {
+      errorMessage = 'No audio detected. Please speak clearly into microphone.'
+      statusCode = 400
+    } else if (err.message.includes('not found')) {
+      errorMessage = 'Upload failed. Please try again.'
+      statusCode = 400
+    }
+
+    res.status(statusCode).json({
+      success: false,
+      error: errorMessage,
+      technicalError:
+        process.env.NODE_ENV === 'development' ? err.message : undefined,
+    })
+  }
+})
+
+// Cleanup job for orphaned files (runs every 15 minutes)
+setInterval(
+  () => {
+    const uploadsDir = path.join(__dirname, 'uploads')
+    if (!fs.existsSync(uploadsDir)) return
+
+    try {
+      const files = fs.readdirSync(uploadsDir)
+      const now = Date.now()
+      const maxAge = 30 * 60 * 1000 // 30 minutes
+
+      let cleaned = 0
+      files.forEach((file) => {
+        try {
+          const filePath = path.join(uploadsDir, file)
+          const stats = fs.statSync(filePath)
+          if (now - stats.mtimeMs > maxAge) {
+            fs.unlinkSync(filePath)
+            cleaned++
+          }
+        } catch (err) {
+          // Skip files that can't be processed
+        }
+      })
+
+      if (cleaned > 0) {
+        console.log(`🧹 Cleaned up ${cleaned} old audio files`)
+      }
+    } catch (err) {
+      console.error('Cleanup job error:', err.message)
+    }
+  },
+  15 * 60 * 1000
+)
 // Twilio setup
 // --------------------
 const client = twilio(
@@ -1342,25 +1556,35 @@ app.get('/locations', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Internal server error' })
   }
 })
-
-// Add this route to your backend (e.g., in routes/emergency.js or app.js)
-
-// Add this route to your backend (e.g., in routes/emergency.js or app.js)
-
-// Add this route to your backend (e.g., in routes/emergency.js or app.js)
-
+const emergencyTypes = [
+  'Police Emergency',
+  'Medical Emergency', 
+  'Fire Emergency',
+  'Accident Emergency'
+]
+// Enhanced emergency creation endpoint with description
 app.post('/emergency/create', authenticateToken, async (req, res) => {
   try {
-    const { type, location, priority = 'Critical' } = req.body
-    const userId = req.user?.id || req.user?.user_id // Try both possible fields from JWT token
+    const { type, location, priority = 'Critical', description, latitude, longitude } = req.body
+    const userId = req.user?.id || req.user?.user_id
 
-    console.log('JWT User object:', req.user) // Debug log
-    console.log('User ID extracted:', userId) // Debug log
+    console.log('Emergency creation request:', { userId, type, location, description, latitude, longitude })
 
     // Validate required fields
-    if (!type || !location) {
+    const validationErrors = []
+    
+    if (!type || !type.trim()) {
+      validationErrors.push({ field: 'type', message: 'Emergency type is required' })
+    }
+    
+    if (!location || !location.trim()) {
+      validationErrors.push({ field: 'location', message: 'Location is required' })
+    }
+
+    if (validationErrors.length > 0) {
       return res.status(400).json({
-        error: 'Type and location are required',
+        error: 'Validation failed',
+        errors: validationErrors
       })
     }
 
@@ -1368,21 +1592,143 @@ app.post('/emergency/create', authenticateToken, async (req, res) => {
     if (!userId) {
       console.error('No user ID found in JWT token')
       return res.status(401).json({
-        error: 'User ID not found in token',
+        error: 'User ID not found in token'
       })
     }
 
-    // Insert emergency into database using Supabase
+    // Get user details for emergency record
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('first_name, last_name, phone, email')
+      .eq('id', userId)
+      .single()
+
+    if (userError) {
+      console.error('Error fetching user:', userError)
+      return res.status(500).json({ error: 'Failed to fetch user details' })
+    }
+
+    // Extract location details using Groq if coordinates are provided
+    let city = null
+    let state = null
+    let pincode = null
+     const coordMatch = location.match(/(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)/)
+    
+  
+
+    if (latitude && longitude) {
+      try {
+        console.log(`🗺️ Extracting location details from coordinates: ${latitude}, ${longitude}`)
+        
+        // Use Groq to extract city, state, and pincode from coordinates
+        const locationPrompt = `Given the coordinates: latitude ${latitude}, longitude ${longitude}
+        
+Please identify the city, state, and pincode (postal code) for these coordinates in India. 
+Respond ONLY in this exact JSON format with no additional text:
+{
+  "city": "city name",
+  "state": "state name",
+  "pincode": "6-digit pincode"
+}
+
+If you cannot determine any value, use null for that field.`
+
+        const groqResponse = await groq.chat.completions.create({
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a geocoding assistant. Extract location information from coordinates and respond only with valid JSON.'
+            },
+            {
+              role: 'user',
+              content: locationPrompt
+            }
+          ],
+          model: 'llama-3.1-8b-instant',
+          temperature: 0.1,
+          max_tokens: 150,
+        })
+
+        const responseText = groqResponse.choices[0]?.message?.content?.trim()
+        console.log('Groq response:', responseText)
+
+        // Parse the JSON response
+        const locationData = JSON.parse(responseText)
+        city = locationData.city || null
+        state = locationData.state || null
+        pincode = locationData.pincode || null
+
+        console.log(`✅ Location extracted: ${city}, ${state}, ${pincode}`)
+
+        // Update user's location information in users table
+        if (city || state || pincode) {
+          const userUpdateData = {}
+          if (city) userUpdateData.city = city
+          if (state) userUpdateData.state = state
+          if (pincode) userUpdateData.zip_code = pincode
+
+          const { error: userUpdateError } = await supabase
+            .from('users')
+            .update(userUpdateData)
+            .eq('id', userId)
+
+          if (userUpdateError) {
+            console.error('Failed to update user location:', userUpdateError)
+          } else {
+            console.log(`✅ Updated user location: ${city}, ${state}, ${pincode}`)
+          }
+        }
+
+      } catch (groqError) {
+        console.error('Groq geocoding error:', groqError)
+        // Fallback to OpenStreetMap Nominatim if Groq fails
+        try {
+          const nominatimResponse = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=10`
+          )
+          const nominatimData = await nominatimResponse.json()
+          
+          if (nominatimData && nominatimData.address) {
+            const address = nominatimData.address
+            city = address.city || address.town || address.village || null
+            state = address.state || null
+            pincode = address.postcode || null
+            
+            console.log(`✅ Fallback location from Nominatim: ${city}, ${state}, ${pincode}`)
+
+            // Update user's location information
+            if (city || state || pincode) {
+              const userUpdateData = {}
+              if (city) userUpdateData.city = city
+              if (state) userUpdateData.state = state
+              if (pincode) userUpdateData.zip_code = pincode
+
+              await supabase
+                .from('users')
+                .update(userUpdateData)
+                .eq('id', userId)
+            }
+          }
+        } catch (nominatimError) {
+          console.error('Nominatim fallback error:', nominatimError)
+        }
+      }
+    }
+
+    // Insert emergency into database (original fields only)
     const { data: emergency, error } = await supabase
       .from('emergencies')
       .insert([
         {
           user_id: userId,
-          type: type,
-          location: location,
+          type: type.trim(),
+          location: location.trim(),
+          description: description?.trim() || "none",
           priority: priority,
           status: 'Reported',
           reported_time: new Date().toISOString(),
+          requester_name: `${user.first_name} ${user.last_name}`,
+          requester_phone: user.phone
         },
       ])
       .select()
@@ -1396,6 +1742,8 @@ app.post('/emergency/create', authenticateToken, async (req, res) => {
       })
     }
 
+    console.log(`✅ Emergency created: ID ${emergency.id}, Type: ${emergency.type}`)
+
     res.json({
       success: true,
       message: 'Emergency reported successfully',
@@ -1403,15 +1751,18 @@ app.post('/emergency/create', authenticateToken, async (req, res) => {
         id: emergency.id,
         type: emergency.type,
         location: emergency.location,
+        description: emergency.description,
         priority: emergency.priority,
         status: emergency.status,
         reported_time: emergency.reported_time,
       },
+      userLocationUpdated: city || state || pincode ? true : false
     })
   } catch (error) {
     console.error('Error creating emergency:', error)
     res.status(500).json({
       error: 'Failed to create emergency report',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     })
   }
 })
@@ -1613,11 +1964,11 @@ app.post('/admin/nearby-services', authenticateAdmin, async (req, res) => {
       const type = emergencyType.toLowerCase()
 
       if (type.includes('fire')) {
-        return ['fire_station', 'hospital', 'police'] // Fire emergencies need all services
+        return ['fire', 'hospital', 'police'] // Fire emergencies need all services
       }
 
       if (type.includes('accident')) {
-        return ['police', 'hospital'] // Accidents need police and medical
+        return ['police', 'medical'] // Accidents need police and medical
       }
 
       if (
@@ -1637,11 +1988,11 @@ app.post('/admin/nearby-services', authenticateAdmin, async (req, res) => {
         type.includes('injury') ||
         type.includes('heart')
       ) {
-        return ['hospital']
+        return ['medical']
       }
 
       // For general emergencies, return all service types
-      return ['hospital', 'police', 'fire_station']
+      return ['medical', 'police', 'fire']
     }
 
     const requiredServiceTypes = getRequiredServiceTypes(emergencyType)
@@ -2613,70 +2964,7 @@ app.post('/get-nearby-services', async (req, res) => {
   }
 })
 
-app.post('/transcribe', upload.single('file'), async (req, res) => {
-  let filePath = null
 
-  try {
-    if (!req.file) {
-      return res
-        .status(400)
-        .json({ success: false, error: 'No audio file received' })
-    }
-
-    filePath = req.file.path // ✅ Now this exists because we use diskStorage
-
-    console.log('Processing audio file:', {
-      filename: req.file.filename,
-      mimetype: req.file.mimetype,
-      size: req.file.size,
-      path: filePath,
-    })
-
-    // ✅ Check if file actually exists
-    if (!fs.existsSync(filePath)) {
-      throw new Error('Uploaded file not found on disk')
-    }
-
-    const transcription = await groq.audio.transcriptions.create({
-      file: fs.createReadStream(filePath),
-      model: 'whisper-large-v3',
-    })
-
-    // ✅ Clean up the temporary file
-    fs.unlinkSync(filePath)
-
-    console.log(
-      'Transcription successful:',
-      transcription.text?.substring(0, 100) + '...'
-    )
-
-    res.json({
-      success: true,
-      text: transcription.text,
-    })
-  } catch (err) {
-    console.error('Error transcribing audio:', err.message)
-
-    // ✅ Clean up file even if transcription fails
-    if (filePath && fs.existsSync(filePath)) {
-      try {
-        fs.unlinkSync(filePath)
-      } catch (cleanupErr) {
-        console.error('Error cleaning up file:', cleanupErr.message)
-      }
-    }
-
-    // ✅ Return more specific error messages
-    let errorMessage = 'Failed to transcribe audio'
-    if (err.message.includes('Unsupported audio format')) {
-      errorMessage = 'Audio format not supported. Please try again.'
-    } else if (err.message.includes('File too large')) {
-      errorMessage = 'Audio file is too large. Please record a shorter message.'
-    }
-
-    res.status(500).json({ success: false, error: errorMessage })
-  }
-})
 // ===========================================
 // DISPATCH UNIT AUTHENTICATION & MANAGEMENT
 // ===========================================
@@ -3697,28 +3985,14 @@ app.get('/dispatch/requests/stats', authenticateDispatchUnit, async (req, res) =
 })
 
 
-
-// Get accepted requests by this dispatch unit
-
-
-// Accept an emergency request
 // Accept an emergency request
 app.post('/dispatch/requests/:requestId/accept', authenticateDispatchUnit, async (req, res) => {
   console.log('🟡 [Backend] Accept request route called');
-  console.log('🟡 [Backend] Request params:', req.params);
-  console.log('🟡 [Backend] Request body:', req.body);
-  console.log('🟡 [Backend] User from token:', req.user);
 
   try {
     const { requestId } = req.params;
     const { unit_id } = req.user;
     const { accepted_by } = req.body;
-
-    console.log('🟡 [Backend] Processing dispatch request:', {
-      requestId,
-      unit_id,
-      accepted_by
-    });
 
     // 1️⃣ Find the dispatch request
     const { data: dispatchReq, error: fetchReqError } = await supabase
@@ -3727,28 +4001,18 @@ app.post('/dispatch/requests/:requestId/accept', authenticateDispatchUnit, async
       .eq('id', requestId)
       .single();
 
-    console.log('🟡 [Backend] Dispatch request lookup:', { dispatchReq, fetchReqError });
-
     if (fetchReqError || !dispatchReq) {
-      console.error('🔴 [Backend] Dispatch request not found:', fetchReqError);
+      console.error('🔴 Dispatch request not found:', fetchReqError);
       return res.status(404).json({ error: 'Dispatch request not found' });
     }
 
-    // Check if this dispatch request is already accepted
     if (dispatchReq.status !== 'Pending') {
-      console.log('🔴 [Backend] Dispatch request already processed:', {
-        status: dispatchReq.status,
-        dispatch_unit_id: dispatchReq.dispatch_unit_id
-      });
-      
-      // Check if it was accepted by the same unit
       if (dispatchReq.dispatch_unit_id === unit_id) {
         return res.json({ 
           message: 'Request already accepted by your unit',
           already_accepted: true 
         });
       }
-      
       return res.status(400).json({
         error: 'This request has already been accepted by another unit',
         already_accepted: true
@@ -3758,27 +4022,17 @@ app.post('/dispatch/requests/:requestId/accept', authenticateDispatchUnit, async
     // 2️⃣ Find the related emergency
     const { data: emergency, error: fetchEmergencyError } = await supabase
       .from('emergencies')
-      .select('id, status, dispatch_unit_id')
+      .select('*')
       .eq('id', dispatchReq.emergency_id)
       .single();
 
-    console.log('🟡 [Backend] Emergency lookup:', { emergency, fetchEmergencyError });
-
     if (fetchEmergencyError || !emergency) {
-      console.error('🔴 [Backend] Emergency not found for dispatch request:', fetchEmergencyError);
+      console.error('🔴 Emergency not found:', fetchEmergencyError);
       return res.status(404).json({ error: 'Emergency not found' });
     }
 
-    // Check if emergency is already accepted
-    if (emergency.status == 'Dispatched' || emergency.dispatch_unit_id) {
-      console.log('🔴 [Backend] Emergency already accepted:', {
-        status: emergency.status,
-        dispatch_unit_id: emergency.dispatch_unit_id
-      });
-      
-      // Check if it was accepted by the same unit
+    if (emergency.status === 'Dispatched' || emergency.dispatch_unit_id) {
       if (emergency.dispatch_unit_id === unit_id) {
-        // Update the dispatch request to match
         await supabase
           .from('dispatch_requests')
           .update({
@@ -3794,17 +4048,74 @@ app.post('/dispatch/requests/:requestId/accept', authenticateDispatchUnit, async
           already_accepted: true 
         });
       }
-      
       return res.status(400).json({
         error: 'Emergency has already been accepted by another unit',
         already_accepted: true
       });
     }
 
-    // 3️⃣ Use a transaction-like approach to update both tables atomically
+    // 3️⃣ Get dispatch unit details
+    const { data: dispatchUnit } = await supabase
+      .from('dispatch_units')
+      .select('department_name, unit_type, place, district, contact_number, officer_in_charge')
+      .eq('id', unit_id)
+      .single();
+
     const currentTime = new Date().toISOString();
     
-    // Update the emergency first with a conditional update
+    // Create dispatch service record
+    const dispatchServiceRecord = {
+      service_name: req.user.department_name || 'Unknown Department',
+      service_type: req.user.unit_type || 'Unknown Type',
+      service_id: unit_id,
+      dispatched_at: currentTime,
+      dispatched_by: accepted_by || req.user.officer_in_charge || 'Dispatch Unit',
+      phone: dispatchUnit?.contact_number || req.user.primary_contact || 'N/A',
+      place: dispatchUnit?.place || req.user.city || 'Unknown',
+      district: req.user.district || 'Unknown',
+      status: 'Accepted',
+      unit_id: unit_id
+    };
+
+    console.log('Dispatch service record:', JSON.stringify(dispatchServiceRecord, null, 2));
+
+    // CRITICAL: Parse existing JSONB data properly
+    let existingServices = [];
+    let existingHistory = [];
+
+    try {
+      existingServices = emergency.dispatched_services 
+        ? (typeof emergency.dispatched_services === 'string' 
+            ? JSON.parse(emergency.dispatched_services) 
+            : emergency.dispatched_services)
+        : [];
+      
+      existingHistory = emergency.dispatch_history 
+        ? (typeof emergency.dispatch_history === 'string' 
+            ? JSON.parse(emergency.dispatch_history) 
+            : emergency.dispatch_history)
+        : [];
+    } catch (parseError) {
+      console.error('🔴 Error parsing JSON:', parseError);
+      existingServices = [];
+      existingHistory = [];
+    }
+
+    // Ensure they are arrays
+    if (!Array.isArray(existingServices)) existingServices = [];
+    if (!Array.isArray(existingHistory)) existingHistory = [];
+
+    console.log('Existing services:', existingServices);
+    console.log('Existing history:', existingHistory);
+
+    // Add new service
+    const updatedServices = [...existingServices, dispatchServiceRecord];
+    const updatedHistory = [...existingHistory, dispatchServiceRecord];
+
+    console.log('Updated services:', JSON.stringify(updatedServices, null, 2));
+    console.log('Updated history:', JSON.stringify(updatedHistory, null, 2));
+
+    // 4️⃣ Update emergency - Use JSON.stringify for JSONB fields
     const { data: updatedEmergency, error: updateEmergencyError } = await supabase
       .from('emergencies')
       .update({
@@ -3812,29 +4123,31 @@ app.post('/dispatch/requests/:requestId/accept', authenticateDispatchUnit, async
         dispatch_unit_id: unit_id,
         accepted_at: currentTime,
         handled_by: accepted_by || 'Dispatch Unit',
+        dispatched_services: updatedServices,
+        dispatch_history: updatedHistory,
       })
       .eq('id', dispatchReq.emergency_id)
-      .eq('status', 'Accepted') // Only update if still reported
-      .is('dispatch_unit_id', null) // Only update if not already assigned
+      .eq('status', 'Accepted')
+      .is('dispatch_unit_id', null)
       .select();
 
-    console.log('🟡 [Backend] Emergency update result:', { updatedEmergency, updateEmergencyError });
+    console.log('Update result:', updatedEmergency);
+    console.log('Update error:', updateEmergencyError);
 
     if (updateEmergencyError) {
-      console.error('🔴 [Backend] Failed to update emergency:', updateEmergencyError);
+      console.error('🔴 Failed to update emergency:', updateEmergencyError);
       return res.status(500).json({ error: 'Failed to update emergency' });
     }
 
-    // If no rows were updated, it means another unit got there first
     if (!updatedEmergency || updatedEmergency.length === 0) {
-      console.log('🔴 [Backend] Emergency was already accepted by another unit (race condition)');
+      console.log('🔴 No rows updated');
       return res.status(400).json({
         error: 'Emergency was just accepted by another unit',
         already_accepted: true
       });
     }
 
-    // 4️⃣ Update dispatch_requests status (this should succeed now)
+    // 5️⃣ Update dispatch_requests
     const { error: updateDispatchReqError } = await supabase
       .from('dispatch_requests')
       .update({
@@ -3845,13 +4158,9 @@ app.post('/dispatch/requests/:requestId/accept', authenticateDispatchUnit, async
       })
       .eq('id', requestId);
 
-    console.log('🟡 [Backend] Dispatch request update result:', { updateDispatchReqError });
-
     if (updateDispatchReqError) {
-      // This shouldn't fail, but if it does, we should rollback the emergency update
-      console.error('🔴 [Backend] Failed to update dispatch request, attempting rollback');
+      console.error('🔴 Failed to update dispatch request, rolling back');
       
-      // Rollback the emergency update
       await supabase
         .from('emergencies')
         .update({
@@ -3865,15 +4174,18 @@ app.post('/dispatch/requests/:requestId/accept', authenticateDispatchUnit, async
       return res.status(500).json({ error: 'Failed to accept request (rollback performed)' });
     }
 
-    console.log('🟢 [Backend] Request accepted successfully');
-    res.json({ message: 'Request accepted successfully', accepted: true });
+    console.log('Request accepted successfully');
+    res.json({ 
+      message: 'Request accepted successfully', 
+      accepted: true,
+      dispatch_info: dispatchServiceRecord 
+    });
     
   } catch (err) {
-    console.error('🔴 [Backend] Accept request error:', err);
+    console.error('🔴 Accept request error:', err);
     res.status(500).json({ error: 'Failed to accept request' });
   }
 });
-
 
 // Update an emergency request
 app.put('/dispatch/requests/:requestId/update', authenticateDispatchUnit, async (req, res) => {

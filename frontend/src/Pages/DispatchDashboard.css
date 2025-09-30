@@ -882,7 +882,33 @@
   border-radius: 50%;
   transition: all 0.3s ease;
 }
+.dispatch-assign-btn{
+  background-color: #4b5563;
+  color: white;
+  border: 1px solid white;
+  border-radius: 5%;
+  margin-top: 15px;
+  padding: 3px;
+}
+.dispatch-assign-btn:hover{
+  cursor: pointer;
+  background-color: #0f172a;
+}
 
+.dispatch-template-btn{
+  background-color: #4b5563;
+  color: white;
+  border: 1px solid white;
+  border-radius: 5%;
+  margin-top: 15px;
+  margin-right: 8px;
+  padding: 3px;
+
+}
+.dispatch-template-btn:hover{
+   cursor: pointer;
+  background-color: #0f172a;
+}
 .dispatch-modal-close:hover {
   background: rgba(239, 68, 68, 0.2);
   color: #f87171;

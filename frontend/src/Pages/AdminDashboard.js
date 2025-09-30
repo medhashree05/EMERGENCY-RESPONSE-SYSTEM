@@ -6,6 +6,7 @@ import './AdminDashboard.css'
 function AdminDashboard() {
   const [currentTime, setCurrentTime] = useState(new Date())
   const [adminData, setAdminData] = useState(null)
+  const [lastResetDate, setLastResetDate] = useState(null)
   const [systemStats, setSystemStats] = useState({
     totalUsers: 0,
     activeEmergencies: 0,
@@ -44,64 +45,104 @@ const [unreadCount, setUnreadCount] = useState(0)
   const navigate = useNavigate()
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date())
-    }, 1000)
+  const timer = setInterval(() => {
+    setCurrentTime(new Date())
+  }, 1000)
 
-    loadAdminData()
-    loadSystemStats()
-    loadRecentEmergencies()
-    loadAvailableEmergencies()
+  // Check and reset daily count on component mount
+  checkAndResetDailyCount()
+  
+  loadAdminData()
+  loadSystemStats()
+  loadRecentEmergencies()
+  loadAvailableEmergencies()
+  loadDispatchMessages()
 
-    // Set up real-time subscription for emergencies
-    const emergenciesSubscription = supabase
-      .channel('emergencies_changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'emergencies' },
-        (payload) => {
-          console.log('Emergency data changed:', payload)
-          loadRecentEmergencies()
-          loadAvailableEmergencies()
-          loadSystemStats()
-        }
-      )
-      .subscribe()
-
-    return () => {
-      clearInterval(timer)
-      emergenciesSubscription.unsubscribe()
-    }
-  }, [])
-
-  const loadAdminData = async () => {
-    try {
-      const token =
-        localStorage.getItem('adminToken') || localStorage.getItem('token')
-      if (!token) {
-        navigate('/login')
-        return
+  // Set up real-time subscription for emergencies
+  const emergenciesSubscription = supabase
+    .channel('emergencies_changes')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'emergencies' },
+      (payload) => {
+        console.log('Emergency data changed:', payload)
+        loadRecentEmergencies()
+        loadAvailableEmergencies()
+        loadSystemStats()
       }
+    )
+    .subscribe()
 
-      const { data, error } = await supabase
-        .from('admin')
-        .select(
-          'id, first_name, last_name, email_address, last_login, calls_attended'
-        )
-        .single()
+  // Check for new day every hour
+  const dailyCheckInterval = setInterval(() => {
+    checkAndResetDailyCount()
+  }, 3600000) // Check every hour (3600000 ms)
 
-      if (error) {
-        console.error('Error fetching admin:', error)
-        return
-      }
+  // Set up interval to check for new messages
+  const messageInterval = setInterval(loadDispatchMessages, 30000)
 
-      setAdminData(data)
-    } catch (error) {
-      console.error('Error loading admin data:', error)
-    } finally {
-      setLoading(false)
-    }
+  return () => {
+    clearInterval(timer)
+    clearInterval(dailyCheckInterval)
+    clearInterval(messageInterval)
+    emergenciesSubscription.unsubscribe()
   }
+}, [])
+  const loadAdminData = async () => {
+  try {
+    const token =
+      localStorage.getItem('adminToken') || localStorage.getItem('token')
+    if (!token) {
+      navigate('/login')
+      return
+    }
+
+    const { data, error } = await supabase
+      .from('admin')
+      .select(
+        'id, first_name, last_name, email_address, last_login, calls_attended, resolved_cases, last_reset_date'
+      )
+      .single()
+
+    if (error) {
+      console.error('Error fetching admin:', error)
+      return
+    }
+
+    // Check if we need to reset the count
+    const today = new Date().toDateString()
+    const lastReset = data.last_reset_date ? new Date(data.last_reset_date).toDateString() : null
+
+    if (lastReset !== today) {
+      console.log('Resetting resolved_cases for new day')
+      
+      // Reset the count in database
+      const { error: resetError } = await supabase
+        .from('admin')
+        .update({
+          resolved_cases: 0,
+          last_reset_date: new Date().toISOString().split('T')[0] // Store as YYYY-MM-DD
+        })
+        .eq('id', data.id)
+
+      if (resetError) {
+        console.error('Error resetting daily count:', resetError)
+      } else {
+        // Update local state with reset values
+        data.resolved_cases = 0
+        data.last_reset_date = new Date().toISOString().split('T')[0]
+      }
+    }
+
+    setAdminData(data)
+    setLastResetDate(data.last_reset_date)
+  } catch (error) {
+    console.error('Error loading admin data:', error)
+  } finally {
+    setLoading(false)
+  }
+}
+
 const loadDispatchMessages = async () => {
   try {
     setLoadingMessages(true)
@@ -213,17 +254,18 @@ useEffect(() => {
         console.error('Error fetching active emergencies:', activeError)
       }
 
-      const today = new Date()
-      today.setHours(0, 0, 0, 0)
-      const { count: totalCalls, error: callsError } = await supabase
-        .from('emergencies')
-        .select('*', { count: 'exact', head: true })
-        .gte('reported_time', today.toISOString())
+      // Fetch total calls_attended from admin table
+      const { data: adminStats, error: callsError } = await supabase
+        .from('admin')
+        .select('calls_attended')
+        .single()
 
       if (callsError) {
-        console.error("Error fetching today's calls:", callsError)
+        console.error('Error fetching calls attended:', callsError)
       }
 
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
       // Use resolved_at for counting resolved emergencies today
       const { count: resolvedToday, error: resolvedError } = await supabase
         .from('emergencies')
@@ -238,7 +280,7 @@ useEffect(() => {
       setSystemStats({
         totalUsers: totalUsers || 0,
         activeEmergencies: activeEmergencies || 0,
-        totalCalls: totalCalls || 0,
+        totalCalls: adminStats?.calls_attended || 0,
         resolvedToday: resolvedToday || 0,
       })
     } catch (error) {
@@ -262,7 +304,7 @@ useEffect(() => {
         )
       `
         )
-        .in('status', ['Accepted', 'responding', 'pending', 'resolved','Dispatched'])
+        .in('status', ['Accepted', 'responding', 'pending', 'resolved','Dispatched','On Scene','Completed'])
         .order('reported_time', { ascending: false })
         .limit(15) // Increased limit to show more resolved cases
 
@@ -595,8 +637,8 @@ const handleMultiDispatchRequest = async () => {
     if (!emergencyId) throw new Error('Emergency ID not found')
 
     // Create multiple dispatch requests
-    const dispatchPromises = selectedServices.map(service => 
-      supabase.from('dispatch_requests').insert({
+    const dispatchPromises = selectedServices.map(async service => {
+      const { data, error } = await supabase.from('dispatch_requests').insert({
         emergency_id: emergencyId,
         dispatch_unit_id: service.id,
         emergency_type: viewEmergency.type,
@@ -604,13 +646,21 @@ const handleMultiDispatchRequest = async () => {
         requester_name: viewEmergency.user_name,
         requester_phone: viewEmergency.user_phone,
         priority: viewEmergency.priority,
-        status: 'Requested',
+        status: 'Pending',  // Note: You used 'Requested' here but 'Pending' in single dispatch
         requested_at: new Date().toISOString(),
         description: `Emergency dispatch request for ${viewEmergency.type} at ${viewEmergency.location}`,
       })
-    )
+      
+      if (error) {
+        console.error('Error inserting dispatch request:', error)
+        throw error
+      }
+      
+      return data
+    })
 
-    await Promise.all(dispatchPromises)
+    const results = await Promise.all(dispatchPromises)
+    console.log('All dispatch requests created:', results)
 
     const unitNames = selectedServices.map(s => s.name).join(', ')
     alert(`Dispatch requests sent to ${selectedServices.length} unit(s): ${unitNames}`)
@@ -672,19 +722,21 @@ const handleDispatch = async () => {
       const type = emergencyType.toLowerCase()
       switch (type) {
         case 'medical':
-        case 'heart attack':
+        case 'medical emergency':
         case 'accident':
-          return ['ambulance', 'hospital']
+          return ['medical']
         case 'fire':
-          return ['fire_department']
+        case 'fire emergency':
+            return ['fire']
         case 'police':
-        case 'theft':
+        case 'police emergency':
         case 'assault':
           return ['police']
         case 'natural disaster':
-          return ['ambulance', 'fire_department', 'police']
+          case 'general emergency':
+          return ['medical', 'fire', 'police']
         default:
-          return ['ambulance', 'police'] // Default services
+          return ['medical', 'police','fire'] // Default services
       }
     }
 
@@ -722,13 +774,13 @@ const handleDispatch = async () => {
       }
       unitsByType[unit.unit_type].push({
         id: unit.id,
-        name: unit.unit_name,
+        name: unit.officer_in_charge,
         type: unit.unit_type,
-        station: unit.station_name,
+        station: unit.department_name,
         contact: unit.contact_number,
         isAvailable: unit.units_available, // Now shows the actual count
         city: unit.city,
-        address: unit.station_address || 'Address not available',
+        address: unit.district || 'Address not available',
         unitData: unit,
       })
     })
@@ -737,12 +789,12 @@ const handleDispatch = async () => {
     setNearbyServices(
       dispatchUnits.map((unit) => ({
         id: unit.id,
-        name: unit.unit_name,
+        name: unit.officer_in_charge,
         serviceType: unit.unit_type,
-        station: unit.station_name,
+        station: unit.department_name,
         contact: unit.contact_number,
         city: unit.city,
-        address: unit.station_address || 'Address not available',
+        address: unit.district || 'Address not available',
         isAvailable: unit.units_available, // Now shows the actual count
         unitData: unit,
       }))
@@ -905,26 +957,25 @@ const handleCreateDispatchRequest = async (service) => {
   }
 }
   const handleUpdateEmergency = async () => {
-    if (!selectedEmergency || !adminData?.id) {
-      alert('Unable to update emergency. Please try again.')
-      return
+  if (!selectedEmergency || !adminData?.id) {
+    alert('Unable to update emergency. Please try again.')
+    return
+  }
+
+  setUpdatingEmergency(selectedEmergency.id)
+
+  try {
+    const updatePayload = {
+      status: updateData.status,
+      priority: updateData.priority,
     }
 
-    setUpdatingEmergency(selectedEmergency.id)
+    // Track if this is a new resolution
+    const isNewResolution = updateData.status === 'resolved' && selectedEmergency.status !== 'resolved'
 
-    try {
-      const updatePayload = {
-        status: updateData.status,
-        priority: updateData.priority,
-      }
-
-      // If resolving, add resolution timestamp and notes
-      if (updateData.status === 'resolved') {
-        updatePayload.resolved_time = new Date().toISOString()
-        updatePayload.resolution_notes = updateData.resolution_notes
-        updatePayload.resolved_by = `${adminData.first_name} ${adminData.last_name}`
-      }
-       if (updateData.status === 'resolved') {
+    // If resolving, add resolution timestamp and notes
+    if (updateData.status === 'resolved') {
+      updatePayload.resolved_at = new Date().toISOString()
       updatePayload.resolved_time = new Date().toISOString()
       updatePayload.resolution_notes = updateData.resolution_notes
       updatePayload.resolved_by = `${adminData.first_name} ${adminData.last_name}`
@@ -938,59 +989,137 @@ const handleCreateDispatchRequest = async (service) => {
         
         if (vehicleError) {
           console.error('Failed to release vehicle:', vehicleError)
-          // Don't fail the whole operation, just log the error
         }
       }
     }
 
-      // If status is changing from 'Reported' to something else and not handled yet
-      if (
-        selectedEmergency.status === 'Reported' &&
-        !selectedEmergency.handled_by
-      ) {
-        updatePayload.handled_by = `${adminData.first_name} ${adminData.last_name}`
-        updatePayload.admin_id = adminData.id
-        updatePayload.accepted_at = new Date().toISOString()
+    // If status is changing from 'Reported' to something else and not handled yet
+    if (
+      selectedEmergency.status === 'Reported' &&
+      !selectedEmergency.handled_by
+    ) {
+      updatePayload.handled_by = `${adminData.first_name} ${adminData.last_name}`
+      updatePayload.admin_id = adminData.id
+      updatePayload.accepted_at = new Date().toISOString()
 
-        // Update admin's calls_attended count
-        await supabase
+      // Update admin's calls_attended count
+      await supabase
+        .from('admin')
+        .update({
+          calls_attended: (adminData.calls_attended || 0) + 1,
+        })
+        .eq('id', adminData.id)
+    }
+
+    // Update the emergency
+    const { error: updateError } = await supabase
+      .from('emergencies')
+      .update(updatePayload)
+      .eq('id', selectedEmergency.id)
+
+    if (updateError) {
+      throw new Error('Failed to update emergency')
+    }
+
+    // If this is a NEW resolution, increment admin's resolved count
+    if (isNewResolution) {
+      console.log('Incrementing resolved cases count for admin:', adminData.id)
+      
+      // Get current admin data with latest reset date
+      const { data: currentAdminData, error: fetchAdminError } = await supabase
+        .from('admin')
+        .select('calls_attended, resolved_cases, last_reset_date')
+        .eq('id', adminData.id)
+        .single()
+
+      if (fetchAdminError) {
+        console.error('Error fetching current admin data:', fetchAdminError)
+      } else {
+        // Check if we need to reset before incrementing
+        const today = new Date().toDateString()
+        const lastReset = currentAdminData.last_reset_date 
+          ? new Date(currentAdminData.last_reset_date).toDateString() 
+          : null
+
+        let newResolvedCount = (currentAdminData.resolved_cases || 0) + 1
+
+        // If last reset was not today, start from 1
+        if (lastReset !== today) {
+          newResolvedCount = 1
+        }
+
+        // Update with new count and today's date
+        const { error: incrementError } = await supabase
           .from('admin')
           .update({
-            calls_attended: (adminData.calls_attended || 0) + 1,
+            resolved_cases: newResolvedCount,
+            last_reset_date: new Date().toISOString().split('T')[0]
           })
           .eq('id', adminData.id)
+
+        if (incrementError) {
+          console.error('Failed to increment resolved cases count:', incrementError)
+        } else {
+          console.log(`Successfully set resolved cases count to ${newResolvedCount}`)
+        }
       }
-
-      const { error: updateError } = await supabase
-        .from('emergencies')
-        .update(updatePayload)
-        .eq('id', selectedEmergency.id)
-
-      if (updateError) {
-        throw new Error('Failed to update emergency')
-      }
-
-      alert('Emergency updated successfully!')
-      setShowUpdateModal(false)
-      setSelectedEmergency(null)
-      setUpdateData({
-        status: '',
-        resolution_notes: '',
-        priority: '',
-      })
-
-      // Refresh all data
-      loadRecentEmergencies()
-      loadAvailableEmergencies()
-      loadSystemStats()
-      loadAdminData()
-    } catch (error) {
-      console.error('Error updating emergency:', error)
-      alert('Failed to update emergency. Please try again.')
-    } finally {
-      setUpdatingEmergency(null)
     }
+
+    alert('Emergency updated successfully!')
+    setShowUpdateModal(false)
+    setSelectedEmergency(null)
+    setUpdateData({
+      status: '',
+      resolution_notes: '',
+      priority: '',
+    })
+
+    // Refresh all data
+    loadRecentEmergencies()
+    loadAvailableEmergencies()
+    loadSystemStats()
+    loadAdminData()
+  } catch (error) {
+    console.error('Error updating emergency:', error)
+    alert('Failed to update emergency. Please try again.')
+  } finally {
+    setUpdatingEmergency(null)
   }
+}
+const checkAndResetDailyCount = async () => {
+  try {
+    const today = new Date().toDateString() // Get today's date as string
+    const storedResetDate = localStorage.getItem('lastResetDate')
+
+    // If it's a new day, reset the count
+    if (storedResetDate !== today) {
+      console.log('New day detected, resetting resolved cases count')
+
+      // Reset all admins' resolved_cases to 0
+      const { error } = await supabase
+        .from('admin')
+        .update({ resolved_cases: 0 })
+        .neq('id', '00000000-0000-0000-0000-000000000000') // Update all records
+
+      if (error) {
+        console.error('Error resetting daily count:', error)
+      } else {
+        // Store today's date in localStorage
+        localStorage.setItem('lastResetDate', today)
+        setLastResetDate(today)
+        console.log('Successfully reset all admin resolved cases to 0')
+        
+        // Reload admin data to reflect the reset
+        loadAdminData()
+      }
+    } else {
+      setLastResetDate(storedResetDate)
+    }
+  } catch (error) {
+    console.error('Error in checkAndResetDailyCount:', error)
+  }
+}
+
 
   const refreshEmergencies = () => {
     loadRecentEmergencies()
@@ -1174,7 +1303,7 @@ const handleCreateDispatchRequest = async (service) => {
               <div className="admin-admin-stat-card">
                 <div className="admin-stat-icon admin-calls-icon">📞</div>
                 <div className="admin-stat-content">
-                  <h3>Total Calls Today</h3>
+                  <h3>Total Calls </h3>
                   <div className="admin-stat-number">
                     {systemStats.totalCalls}
                   </div>

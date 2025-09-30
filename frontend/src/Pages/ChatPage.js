@@ -12,7 +12,19 @@ function ChatPage() {
   const [sessionId, setSessionId] = useState(null)
   const [messageCount, setMessageCount] = useState(0)
   const [showLocationPrompt, setShowLocationPrompt] = useState(false)
-  const [currentEmergencyType, setCurrentEmergencyType] = useState(null) // 🆕 Track current emergency type
+  const [currentEmergencyType, setCurrentEmergencyType] = useState(null)
+  
+  // New state for emergency creation flow
+  const [emergencyCreationFlow, setEmergencyCreationFlow] = useState({
+    isActive: false,
+    step: null, // 'type', 'location', 'description', 'confirm'
+    data: {
+      type: null,
+      location: null,
+      description: null
+    }
+  })
+
   const messagesEndRef = useRef(null)
   const navigate = useNavigate()
   const location = useLocation()
@@ -25,146 +37,308 @@ function ChatPage() {
     scrollToBottom()
   }, [messages])
 
-  // 🆕 Function to get emergency-specific intro messages
+  // Emergency type options
+  const emergencyTypes = [
+    'Police Emergency',
+    'Medical Emergency', 
+    'Fire Emergency',
+    'Accident Emergency'
+  ]
+
+  const getAuthToken = () => {
+    return localStorage.getItem('token')
+  }
+
+  // Function to get emergency-specific intro messages
   const getEmergencyIntroMessage = (emergencyType) => {
     const emergencyIntros = {
       'Police Emergency': {
         icon: '🛡️',
         title: 'POLICE EMERGENCY ASSISTANCE',
-        message: "🚨 **POLICE EMERGENCY ACTIVE** - I'm here to help with your police emergency situation!\n\nI can assist you with:\n• Understanding police procedures\n• Finding nearby police stations\n• Safety guidance while waiting for police\n• Documentation tips for incidents\n• Legal rights information\n\n**If you're in immediate danger, call 100 (Police) right now!**\n\nWhat specific police assistance do you need?"
+        message: "🚨 **POLICE EMERGENCY ACTIVE** - I'm here to help with your police emergency situation!"
       },
       'Medical Emergency': {
         icon: '❤️',
         title: 'MEDICAL EMERGENCY ASSISTANCE',
-        message: "🚑 **MEDICAL EMERGENCY ACTIVE** - I'm here to provide immediate medical guidance!\n\nI can help with:\n• First aid instructions\n• CPR and basic life support guidance\n• Symptom assessment\n• Finding nearest hospitals\n• Medical emergency procedures\n• Medication information\n\n**For life-threatening emergencies, call 108 (Ambulance) immediately!**\n\nDescribe your medical situation - I'll provide appropriate guidance."
+        message: "🚑 **MEDICAL EMERGENCY ACTIVE** - I'm here to provide immediate medical guidance!"
       },
       'Fire Emergency': {
         icon: '🔥',
         title: 'FIRE EMERGENCY ASSISTANCE',
-        message: "🔥 **FIRE EMERGENCY ACTIVE** - I'm here to help with fire safety and evacuation!\n\nI can assist with:\n• Fire evacuation procedures\n• Fire safety protocols\n• Smoke inhalation guidance\n• Burn treatment instructions\n• Finding fire department locations\n• Fire prevention tips\n\n**For active fires, call 101 (Fire Department) immediately!**\n\nTell me about your fire emergency situation."
+        message: "🔥 **FIRE EMERGENCY ACTIVE** - I'm here to help with fire safety and evacuation!"
       },
       'Accident Emergency': {
         icon: '🚗',
         title: 'ACCIDENT EMERGENCY ASSISTANCE',
-        message: "🚗 **ACCIDENT EMERGENCY ACTIVE** - I'm here to help with accident response and safety!\n\nI can help with:\n• Accident scene safety procedures\n• Injury assessment and first aid\n• Traffic accident protocols\n• Insurance and documentation guidance\n• Towing and recovery services\n• Legal requirements after accidents\n\n**For serious accidents with injuries, call 108 (Ambulance) or 100 (Police)!**\n\nDescribe the accident situation - I'll guide you through the proper response."
+        message: "🚗 **ACCIDENT EMERGENCY ACTIVE** - I'm here to help with accident response and safety!"
       }
     }
 
     return emergencyIntros[emergencyType] || {
       icon: '🚨',
       title: 'EMERGENCY ASSISTANCE',
-      message: "🚨 **EMERGENCY ACTIVE** - I'm here to help with your emergency situation!\n\nI can provide guidance, connect you with appropriate services, and offer support during this critical time.\n\n**For life-threatening emergencies, call emergency services immediately!**\n\nHow can I assist you right now?"
+      message: "🚨 **EMERGENCY ACTIVE** - I'm here to help with your emergency situation!"
     }
   }
 
-  // 🆕 Function to get default (non-emergency) intro message
   const getDefaultIntroMessage = () => {
     return {
       icon: '🤖',
       title: 'Emergency Response AI Assistant',
-      message: "Hello! I'm your Emergency Response AI Assistant. How can I help you today? I can assist with emergency information, safety tips, first aid guidance, and connecting you with appropriate services."
+      message: "Hello! I'm your Emergency Response AI Assistant. How can I help you today?"
     }
   }
 
-  // 🆕 Enhanced initialization for emergency sessions
-  useEffect(() => {
-    const initializeSession = () => {
-      // Check if navigated from emergency (via location state)
-      const emergencyState = location.state
-      
-      // Check for stored emergency response
-      const storedEmergencyResponse = localStorage.getItem('emergencyResponse')
-      const emergencySessionId = localStorage.getItem('emergencySessionId')
-      
-      if (emergencyState || (storedEmergencyResponse && emergencySessionId)) {
-        // Handle emergency session
-        const emergencyData = emergencyState || JSON.parse(storedEmergencyResponse)
-        const emergencyType = emergencyData.emergencyType || emergencyState?.emergencyType
-        
-        setSessionId(emergencySessionId)
-        setIsEmergency(true)
-        setCurrentEmergencyType(emergencyType) // 🆕 Set current emergency type
-        
-        // Get emergency-specific intro message
-        const introData = getEmergencyIntroMessage(emergencyType)
-        
-        // Add emergency messages to chat
-        const emergencyMessages = [
-          {
-            id: 1,
-            text: introData.message,
+  // Function to detect emergency creation intent
+  const detectEmergencyCreationIntent = (message) => {
+    const creationKeywords = [
+      'report emergency',
+      'create emergency',
+      'log emergency',
+      'report an emergency',
+      'need to report',
+      'file emergency',
+      'register emergency',
+      'submit emergency',
+      'i have an emergency',
+      'there is an emergency'
+    ]
+    
+    return creationKeywords.some(keyword => 
+      message.toLowerCase().includes(keyword)
+    )
+  }
+
+  // Function to start emergency creation flow
+  const startEmergencyCreation = () => {
+    setEmergencyCreationFlow({
+      isActive: true,
+      step: 'type',
+      data: { type: null, location: null, description: null }
+    })
+
+    setMessages(prev => [...prev, {
+      id: Date.now(),
+      text: `🚨 **Emergency Report Creation**\n\nI'll help you create an emergency report. Let's start:\n\n**Step 1: Select Emergency Type**\n\nPlease choose the type of emergency:`,
+      sender: 'ai',
+      timestamp: new Date(),
+      isUrgent: true
+    }])
+  }
+
+  // Function to handle emergency creation steps
+  const handleEmergencyCreationStep = async (userInput) => {
+    const { step, data } = emergencyCreationFlow
+
+    switch (step) {
+      case 'type':
+        const selectedType = emergencyTypes.find(type => 
+          userInput.toLowerCase().includes(type.toLowerCase()) ||
+          userInput === type
+        )
+
+        if (selectedType) {
+          setEmergencyCreationFlow(prev => ({
+            ...prev,
+            step: 'location',
+            data: { ...prev.data, type: selectedType }
+          }))
+
+          setMessages(prev => [...prev, {
+            id: Date.now(),
+            text: `✅ Emergency Type: **${selectedType}**\n\n**Step 2: Provide Location**\n\nPlease share your location by:\n• Using the location button below\n• Typing your address\n• Providing coordinates (latitude, longitude)`,
             sender: 'ai',
             timestamp: new Date(),
-            isUrgent: true,
-            emergencyType: emergencyType, // 🆕 Store emergency type in message
-            icon: introData.icon,
-            title: introData.title
-          }
-        ]
-        
-        if (storedEmergencyResponse) {
-          const data = JSON.parse(storedEmergencyResponse)
-          emergencyMessages.push(
-            {
-              id: 2,
-              text: data.userMessage,
-              sender: 'user',
-              timestamp: new Date(data.timestamp),
-              isUrgent: true
-            },
-            {
-              id: 3,
-              text: data.aiResponse,
-              sender: 'ai',
-              timestamp: new Date(),
-              isUrgent: true
-            }
-          )
-          
-          // Clear stored emergency data
-          localStorage.removeItem('emergencyResponse')
-          localStorage.removeItem('emergencySessionId')
+            isUrgent: true
+          }])
+
+          setShowLocationPrompt(true)
+        } else {
+          setMessages(prev => [...prev, {
+            id: Date.now(),
+            text: `⚠️ Please select a valid emergency type from the options above.`,
+            sender: 'ai',
+            timestamp: new Date()
+          }])
         }
-        
-        setMessages(emergencyMessages)
-        setMessageCount(emergencyMessages.length - 1)
-        
-      } else {
-        // Normal session initialization with default intro
-        const defaultIntro = getDefaultIntroMessage()
-        
-        setMessages([{
-          id: 1,
-          text: defaultIntro.message,
+        break
+
+      case 'location':
+        setEmergencyCreationFlow(prev => ({
+          ...prev,
+          step: 'description',
+          data: { ...prev.data, location: userInput }
+        }))
+
+        setMessages(prev => [...prev, {
+          id: Date.now(),
+          text: `✅ Location saved: ${userInput}\n\n**Step 3: Describe the Situation**\n\nPlease provide a brief description of the emergency situation:`,
           sender: 'ai',
           timestamp: new Date(),
-          icon: defaultIntro.icon,
-          title: defaultIntro.title
+          isUrgent: true
         }])
-        
-        const savedSessionId = localStorage.getItem('chatSessionId')
-        if (savedSessionId) {
-          setSessionId(savedSessionId)
+        break
+
+      case 'description':
+        setEmergencyCreationFlow(prev => ({
+          ...prev,
+          step: 'confirm',
+          data: { ...prev.data, description: userInput }
+        }))
+
+        const confirmationText = `✅ Description saved.\n\n**Emergency Report Summary:**\n\n🚨 **Type:** ${data.type}\n📍 **Location:** ${data.location}\n📝 **Description:** ${userInput}\n\n**Is this information correct?**\nType "confirm" to submit or "cancel" to start over.`
+
+        setMessages(prev => [...prev, {
+          id: Date.now(),
+          text: confirmationText,
+          sender: 'ai',
+          timestamp: new Date(),
+          isUrgent: true
+        }])
+        break
+
+      case 'confirm':
+        if (userInput.toLowerCase().includes('confirm')) {
+          await submitEmergencyReport()
+        } else if (userInput.toLowerCase().includes('cancel')) {
+          cancelEmergencyCreation()
+        } else {
+          setMessages(prev => [...prev, {
+            id: Date.now(),
+            text: `Please type "confirm" to submit the emergency report or "cancel" to start over.`,
+            sender: 'ai',
+            timestamp: new Date()
+          }])
         }
-      }
+        break
     }
-    
-    initializeSession()
-  }, [location.state])
-
-  // Save session ID when it changes (existing functionality)
-  useEffect(() => {
-    if (sessionId && !localStorage.getItem('emergencySessionId')) {
-      localStorage.setItem('chatSessionId', sessionId)
-    }
-  }, [sessionId])
-
-  // 🆕 Get authentication token
-  const getAuthToken = () => {
-    return localStorage.getItem('token')
   }
 
-  // 🆕 Store location coordinates (existing functionality)
+  // Function to submit emergency report to backend
+  const submitEmergencyReport = async () => {
+    const { type, location, description } = emergencyCreationFlow.data
+    const token = getAuthToken()
+
+    if (!token) {
+      setMessages(prev => [...prev, {
+        id: Date.now(),
+        text: `❌ You must be logged in to create an emergency report. Please log in and try again.`,
+        sender: 'ai',
+        timestamp: new Date()
+      }])
+      setEmergencyCreationFlow({ isActive: false, step: null, data: {} })
+      return
+    }
+
+    setIsTyping(true)
+
+    try {
+      const response = await fetch('http://localhost:8000/emergency/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          type,
+          location,
+          description,
+          priority: 'Critical'
+        })
+      })
+
+      const result = await response.json()
+
+      if (response.ok && result.success) {
+        setMessages(prev => [...prev, {
+          id: Date.now(),
+          text: `✅ **Emergency Report Created Successfully!**\n\n📋 **Report ID:** ${result.emergency.id}\n🚨 **Type:** ${result.emergency.type}\n📍 **Location:** ${result.emergency.location}\n⏰ **Status:** ${result.emergency.status}\n\nEmergency services have been notified. Help is on the way!`,
+          sender: 'ai',
+          timestamp: new Date(),
+          isUrgent: true
+        }])
+
+        setEmergencyCreationFlow({ isActive: false, step: null, data: {} })
+        setIsEmergency(true)
+      } else {
+        throw new Error(result.error || 'Failed to create emergency report')
+      }
+    } catch (error) {
+      console.error('Emergency creation error:', error)
+      setMessages(prev => [...prev, {
+        id: Date.now(),
+        text: `❌ Failed to create emergency report: ${error.message}\n\nPlease try again or contact emergency services directly.`,
+        sender: 'ai',
+        timestamp: new Date()
+      }])
+    } finally {
+      setIsTyping(false)
+    }
+  }
+
+  // Function to cancel emergency creation
+  const cancelEmergencyCreation = () => {
+    setEmergencyCreationFlow({ isActive: false, step: null, data: {} })
+    setMessages(prev => [...prev, {
+      id: Date.now(),
+      text: `Emergency report creation cancelled. How else can I help you?`,
+      sender: 'ai',
+      timestamp: new Date()
+    }])
+  }
+
+  // Handle location for emergency creation
+  const handleEmergencyLocation = async (latitude, longitude) => {
+    if (emergencyCreationFlow.isActive && emergencyCreationFlow.step === 'location') {
+      const locationString = `${latitude}, ${longitude}`
+      
+      setMessages(prev => [...prev, {
+        id: Date.now(),
+        text: locationString,
+        sender: 'user',
+        timestamp: new Date()
+      }])
+
+      await handleEmergencyCreationStep(locationString)
+      setShowLocationPrompt(false)
+    }
+  }
+
+  const getCurrentLocation = () => {
+    setShowLocationPrompt(false)
+    
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser')
+      return
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude, longitude } = position.coords
+        
+        if (emergencyCreationFlow.isActive && emergencyCreationFlow.step === 'location') {
+          await handleEmergencyLocation(latitude, longitude)
+        } else {
+          await handleStoreLocation(latitude, longitude)
+        }
+      },
+      (error) => {
+        console.error('Location error:', error)
+        setMessages(prev => [...prev, {
+          id: Date.now(),
+          text: `📍 Unable to get location. Please enter manually.`,
+          sender: 'ai',
+          timestamp: new Date()
+        }])
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 300000
+      }
+    )
+  }
+
   const handleStoreLocation = async (latitude, longitude, address = null) => {
     const token = getAuthToken()
     
@@ -208,53 +382,6 @@ function ChatPage() {
     }
   }
 
-  // 🆕 Get current location using browser GPS (existing functionality)
-  const getCurrentLocation = () => {
-    setShowLocationPrompt(false)
-    
-    if (!navigator.geolocation) {
-      alert('Geolocation is not supported by your browser')
-      return
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const { latitude, longitude } = position.coords
-        await handleStoreLocation(latitude, longitude)
-      },
-      (error) => {
-        console.error('Location error:', error)
-        let errorMessage = 'Unable to get your location. '
-        switch(error.code) {
-          case error.PERMISSION_DENIED:
-            errorMessage += 'Location access denied by user.'
-            break
-          case error.POSITION_UNAVAILABLE:
-            errorMessage += 'Location information is unavailable.'
-            break
-          case error.TIMEOUT:
-            errorMessage += 'Location request timed out.'
-            break
-          default:
-            errorMessage += 'An unknown error occurred.'
-            break
-        }
-        
-        setMessages(prev => [...prev, {
-          id: Date.now(),
-          text: `📍 ${errorMessage} You can manually enter coordinates or address instead.`,
-          sender: 'ai',
-          timestamp: new Date()
-        }])
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 300000
-      }
-    )
-  }
-
   async function handleSendMessage(textOverride = null) {
     const messageText = String(textOverride ?? inputText).trim()
     if (!messageText) return
@@ -268,6 +395,20 @@ function ChatPage() {
 
     setMessages((prev) => [...prev, newMessage])
     setInputText('')
+
+    // Check if in emergency creation flow
+    if (emergencyCreationFlow.isActive) {
+      await handleEmergencyCreationStep(messageText)
+      return
+    }
+
+    // Check if user wants to create emergency report
+    if (detectEmergencyCreationIntent(messageText)) {
+      startEmergencyCreation()
+      return
+    }
+
+    // Normal chat flow continues...
     setIsTyping(true)
 
     try {
@@ -290,7 +431,6 @@ function ChatPage() {
       const data = await res.json()
       const aiResponse = data.reply || '⚠️ Sorry, I could not process that.'
 
-      // Update session info from response
       if (data.sessionId) {
         setSessionId(data.sessionId)
       }
@@ -308,7 +448,6 @@ function ChatPage() {
         },
       ])
 
-      // Handle location detection (existing functionality)
       if (data.locationDetected) {
         const coordinatePattern = /(-?\d+\.?\d*),\s*(-?\d+\.?\d*)/
         const coordinateMatch = messageText.match(coordinatePattern)
@@ -318,7 +457,6 @@ function ChatPage() {
         }
       }
 
-      // Check for emergency keywords and set alert
       const emergencyKeywords = ['emergency', 'help', 'urgent', 'pain', 'fire', 'accident', 'bleeding', 'police', 'ambulance', 'medical']
       const hasEmergencyKeyword = emergencyKeywords.some(keyword => 
         messageText.toLowerCase().includes(keyword) || 
@@ -345,7 +483,6 @@ function ChatPage() {
     }
   }
 
-  // Clear chat session
   const handleClearChat = async () => {
     if (!sessionId) return
 
@@ -357,7 +494,6 @@ function ChatPage() {
       console.error('Error clearing session:', error)
     }
 
-    // Reset local state with default intro
     const defaultIntro = getDefaultIntroMessage()
     setMessages([{
       id: 1,
@@ -370,8 +506,9 @@ function ChatPage() {
     setSessionId(null)
     setMessageCount(0)
     setIsEmergency(false)
-    setCurrentEmergencyType(null) // 🆕 Reset emergency type
+    setCurrentEmergencyType(null)
     setShowLocationPrompt(false)
+    setEmergencyCreationFlow({ isActive: false, step: null, data: {} })
     localStorage.removeItem('chatSessionId')
   }
 
@@ -383,65 +520,33 @@ function ChatPage() {
   }
 
   const handleEmergencyCall = () => {
-    window.location.href = 'tel:911'
+    window.location.href = 'tel:100'
   }
 
-  // 🆕 Enhanced quick responses based on emergency type
-  const getQuickResponses = (emergencyType) => {
-    const emergencyQuickResponses = {
-      'Police Emergency': [
-        'I need police assistance now',
-        'How do I report a crime?',
-        'I feel unsafe',
-        'Document this incident',
-        'What are my rights?',
-        'Find nearest police station'
-      ],
-      'Medical Emergency': [
-        'I need first aid help',
-        'Someone is unconscious',
-        'Chest pain symptoms',
-        'Severe bleeding',
-        'Find nearest hospital',
-        'CPR instructions'
-      ],
-      'Fire Emergency': [
-        'How to evacuate safely?',
-        'Smoke inhalation help',
-        'Fire extinguisher use',
-        'Burn treatment',
-        'Electrical fire safety',
-        'Find fire department'
-      ],
-      'Accident Emergency': [
-        'Car accident protocol',
-        'Check for injuries',
-        'Call insurance',
-        'Document the scene',
-        'Towing services',
-        'Legal requirements'
-      ]
+  const getQuickResponses = () => {
+    if (emergencyCreationFlow.isActive) {
+      switch (emergencyCreationFlow.step) {
+        case 'type':
+          return emergencyTypes
+        case 'confirm':
+          return ['Confirm', 'Cancel']
+        default:
+          return []
+      }
     }
-
-    return emergencyQuickResponses[emergencyType] || [
+    
+    return [
+      'Report an emergency',
       'I need help with first aid',
-      'How do I call emergency services?',
-      "I'm having chest pain",
-      "There's a fire",
-      'I need mental health support',
-      "I'm lost and need location help",
-      'Store my current location',
-      'What should I do while waiting for help?',
       'Find nearest hospital',
-      'Contact emergency services'
+      'Store my current location'
     ]
   }
 
-  const quickResponses = getQuickResponses(currentEmergencyType)
+  const quickResponses = getQuickResponses()
 
   return (
     <div className="chat-page">
-      {/* Header */}
       <header className="chat-header">
         <div className="chat-header-content">
           <button className="back-button" onClick={() => navigate('/')}>
@@ -451,12 +556,13 @@ function ChatPage() {
             <h1>
               {currentEmergencyType ? 
                 getEmergencyIntroMessage(currentEmergencyType).icon : '🤖'} 
-              {currentEmergencyType ? 
-                getEmergencyIntroMessage(currentEmergencyType).title : 
-                'Emergency AI Assistant'}
+              Emergency AI Assistant
             </h1>
             <span className="chat-status">
-              {isEmergency ? `🚨 ${currentEmergencyType || 'Emergency Mode'}` : 'Online'} • {messageCount > 0 && `${messageCount} messages`}
+              {emergencyCreationFlow.isActive ? 
+                `📝 Creating Emergency Report (Step ${['type', 'location', 'description', 'confirm'].indexOf(emergencyCreationFlow.step) + 1}/4)` : 
+                isEmergency ? `🚨 ${currentEmergencyType || 'Emergency Mode'}` : 'Online'
+              } • {messageCount > 0 && `${messageCount} messages`}
             </span>
           </div>
           <div className="header-actions">
@@ -476,7 +582,6 @@ function ChatPage() {
         </div>
       </header>
 
-      {/* Emergency Alert */}
       {isEmergency && (
         <div className={`emergency-alert ${currentEmergencyType ? currentEmergencyType.toLowerCase().replace(' ', '-') : ''}`}>
           <div className="emergency-alert-content">
@@ -500,14 +605,13 @@ function ChatPage() {
         </div>
       )}
 
-      {/* Location Prompt (existing functionality) */}
       {showLocationPrompt && (
         <div className="location-prompt">
           <div className="location-prompt-content">
             <span className="location-icon">📍</span>
             <div className="location-text">
               <strong>Enable Location Sharing</strong>
-              <p>Allow location access to save your coordinates for emergency services</p>
+              <p>Allow location access {emergencyCreationFlow.isActive ? 'for emergency report' : 'to save your coordinates'}</p>
             </div>
             <div className="location-actions">
               <button 
@@ -527,7 +631,6 @@ function ChatPage() {
         </div>
       )}
 
-      {/* Chat Messages */}
       <div className="chat-container">
         <div className="messages-container">
           {messages.map((message) => (
@@ -563,7 +666,6 @@ function ChatPage() {
             </div>
           ))}
 
-          {/* Typing Indicator */}
           {isTyping && (
             <div className="message ai">
               <div className="message-content">
@@ -583,7 +685,6 @@ function ChatPage() {
         </div>
       </div>
 
-      {/* Quick Response Buttons */}
       <div className="quick-responses">
         <div className="quick-responses-container">
           {quickResponses.map((text, idx) => (
@@ -598,7 +699,6 @@ function ChatPage() {
         </div>
       </div>
 
-      {/* Input Area */}
       <div className="chat-input-area">
         <div className="chat-input-container">
           <textarea
@@ -606,9 +706,12 @@ function ChatPage() {
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder={currentEmergencyType ? 
-              `Describe your ${currentEmergencyType.toLowerCase()} situation...` : 
-              "Type your message here... For emergencies, call 911 immediately."
+            placeholder={
+              emergencyCreationFlow.isActive
+                ? `Enter ${emergencyCreationFlow.step}...`
+                : currentEmergencyType ? 
+                  `Describe your ${currentEmergencyType.toLowerCase()} situation...` : 
+                  "Type 'report an emergency' to create an emergency report..."
             }
             rows="1"
             disabled={isTyping}
