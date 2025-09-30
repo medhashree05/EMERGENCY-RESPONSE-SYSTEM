@@ -3212,7 +3212,7 @@ app.post('/dispatch/send_otp', async (req, res) => {
       dispatchData: {
         department_name: department_name.trim(),
         unit_type,
-        place: place.trim(),
+        city: place.trim(),
         district: district.trim(),
         state: state.trim(),
         pincode: pincode.trim(),
