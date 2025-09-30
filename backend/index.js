@@ -3311,7 +3311,7 @@ app.post('/dispatch/verify_otp', async (req, res) => {
         },
       ])
       .select(
-        'id, email, username, department_name, unit_type, place, district, state, contact_number'
+        'id, email, username, department_name, unit_type, city, district, state, contact_number'
       )
       .single()
 
