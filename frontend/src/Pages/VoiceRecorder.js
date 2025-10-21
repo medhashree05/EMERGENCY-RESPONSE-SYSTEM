@@ -2,9 +2,9 @@ import React, { useRef, useState } from 'react'
 
 export default function VoiceRecorder({ onSendAudio }) {
   const mediaRecorderRef = useRef(null)
-  const audioChunksRef = useRef([]) // ✅ Use ref instead of state
+  const audioChunksRef = useRef([]) 
   const [isRecording, setIsRecording] = useState(false)
-  const streamRef = useRef(null) // ✅ Store stream to clean up properly
+  const streamRef = useRef(null) 
 
   const startRecording = async () => {
     try {
@@ -12,7 +12,7 @@ export default function VoiceRecorder({ onSendAudio }) {
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          sampleRate: 16000 // Optimal for Whisper
+          sampleRate: 16000 
         }
       })
       

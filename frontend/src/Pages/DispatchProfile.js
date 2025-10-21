@@ -15,7 +15,8 @@ function DispatchProfile() {
       navigate("/dispatch-profile");
       return;
     }
-
+  
+    
     const fetchDispatchProfile = async () => {
       try {
         const res = await fetch("http://localhost:8000/dispatch/profile/me", {

@@ -2506,6 +2506,76 @@ app.put('/locations/:id', authenticateToken, async (req, res) => {
   }
 })
 
+// Update emergency location continuously
+app.put('/emergency/:emergencyId/update-location', authenticateToken, async (req, res) => {
+  try {
+    const { emergencyId } = req.params
+    const { latitude, longitude } = req.body
+    const userId = req.user?.id || req.user?.user_id
+
+    // Validate coordinates
+    if (!latitude || !longitude) {
+      return res.status(400).json({ error: 'Latitude and longitude required' })
+    }
+
+    if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+      return res.status(400).json({ error: 'Invalid coordinates' })
+    }
+
+    // Get emergency and verify ownership
+    const { data: emergency, error: fetchError } = await supabase
+      .from('emergencies')
+      .select('user_id, status')
+      .eq('id', emergencyId)
+      .single()
+
+    if (fetchError || !emergency) {
+      return res.status(404).json({ error: 'Emergency not found' })
+    }
+
+    if (emergency.user_id !== userId) {
+      return res.status(403).json({ error: 'Not authorized' })
+    }
+
+    // Don't update if resolved
+    const inactiveStatuses = ['Resolved', 'Completed', 'Cancelled', 'Closed', 'resolved']
+    if (inactiveStatuses.includes(emergency.status)) {
+      return res.status(400).json({ 
+        error: 'Emergency already resolved',
+        status: emergency.status,
+        stopTracking: true
+      })
+    }
+
+    // Update location as comma-separated string
+    const locationString = `${latitude},${longitude}`
+    
+    const { error: updateError } = await supabase
+      .from('emergencies')
+      .update({ 
+        location: locationString,
+        location_updated_at: new Date().toISOString()
+      })
+      .eq('id', emergencyId)
+
+    if (updateError) {
+      console.error('Location update error:', updateError)
+      return res.status(500).json({ error: 'Failed to update location' })
+    }
+
+    console.log(`Location updated for emergency ${emergencyId}: ${locationString}`)
+
+    res.json({
+      success: true,
+      location: locationString,
+      updated_at: new Date().toISOString()
+    })
+
+  } catch (error) {
+    console.error('Update emergency location error:', error)
+    res.status(500).json({ error: 'Failed to update location' })
+  }
+})
 // POST /call
 // Replace the existing /emergency/call route in your backend index.js
 

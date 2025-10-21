@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase } from '../supabaseClient' // Adjust import path as needed
+import { supabase } from '../supabaseClient' 
 import './Dashboard.css'
+import { useEmergencyLocationTracker } from '../hooks/useEmergencyLocationTracker'
 
 export default function Dashboard() {
   const [currentTime, setCurrentTime] = useState(new Date())
@@ -13,6 +14,7 @@ export default function Dashboard() {
   const [showTrackPopup, setShowTrackPopup] = useState(false)
   const [showUpdatesPopup, setShowUpdatesPopup] = useState(false)
   const [selectedEmergency, setSelectedEmergency] = useState(null)
+   const token = localStorage.getItem('token')
   const navigate = useNavigate()
 
   // ✅ Fetch user from localStorage
@@ -96,7 +98,13 @@ export default function Dashboard() {
   const activeEmergencies = emergencies.filter(emergency =>
     emergency.status !== 'Resolved' && emergency.status !== 'resolved'
   )
-
+const activeEmergencyId = activeEmergencies[0]?.id || null
+const hasActiveEmergency = activeEmergencies.length > 0
+  const { isTracking, lastUpdate, error: trackingError } = useEmergencyLocationTracker(
+    activeEmergencyId,
+    token,
+    hasActiveEmergency
+  )
   // Helper function to format time
   const formatTime = (timestamp) => {
     const date = new Date(timestamp)
@@ -278,8 +286,31 @@ export default function Dashboard() {
           <section className="emergencies-section">
             <div className="section-header">
               <h3>Your Active Emergencies</h3>
-              <span className="status-indicator">Tracking Dispatch</span>
+              <div className="tracking-status">
+      {isTracking ? (
+        <span className="status-indicator tracking">
+          📍 Location Tracking Active
+        </span>
+      ) : hasActiveEmergency ? (
+        <span className="status-indicator warning">
+          ⚠️ Location Tracking Disabled
+        </span>
+      ) : (
+        <span className="status-indicator">No Active Emergencies</span>
+      )}
+    </div>
             </div>
+            {trackingError && (
+    <div className="tracking-error">
+      ⚠️ {trackingError}
+    </div>
+  )}
+  
+  {lastUpdate && (
+    <div className="tracking-info">
+      Last location update: {lastUpdate.timestamp.toLocaleTimeString()}
+    </div>
+  )}
 
             <div className="emergency-cards">
               {activeEmergencies.length > 0 ? (
